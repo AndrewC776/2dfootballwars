@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070a10" />
+    <meta name="description" content="A fast, playful two-player arcade football match." />
+    <title>2D Football Wars</title>
+  </head>
+  <body>
+    <main class="game-shell">
+      <div id="menu-root"></div>
+      <div id="game-root" hidden>
+      <section class="arena-wrap" aria-label="Football match">
+        <canvas id="game-canvas" width="1600" height="900" aria-label="2D Football Wars stadium and live match" role="img"></canvas>
+        <div class="scoreboard" aria-live="polite">
+          <div class="score-side blue-side"><span class="team-tag">BLUE</span><strong id="blue-score">0</strong></div>
+          <div class="match-clock"><strong id="clock">1:00</strong><span id="match-label">QUICK MATCH</span></div>
+          <div class="score-side red-side"><strong id="red-score">0</strong><span class="team-tag">RED</span></div>
+        </div>
+        <div class="match-message" id="match-message" aria-live="polite"></div>
+        <div class="arena-actions">
+          <button class="icon-button" id="pause-btn" type="button" aria-label="Pause match" title="Pause match"><span class="pause-icon" aria-hidden="true">Ⅱ</span></button>
+          <button class="icon-button menu-button" id="menu-btn" type="button" aria-label="Return to main menu" title="Main menu"><span aria-hidden="true">⌂</span></button>
+        </div>
+        <div class="player-hud blue-hud" aria-label="Blue player status"><span class="hud-name">BLUE <b id="blue-player-name">1</b></span><div class="meter health-meter"><i id="blue-health"></i></div><div class="meter stamina-meter"><i id="blue-stamina"></i></div><span class="hud-state" id="blue-state"></span></div>
+        <div class="player-hud red-hud" aria-label="Red player status"><span class="hud-name">RED <b id="red-player-name">2</b></span><div class="meter health-meter"><i id="red-health"></i></div><div class="meter stamina-meter"><i id="red-stamina"></i></div><span class="hud-state" id="red-state"></span></div>
+        <div class="arena-mode-label" id="arena-mode-label">CLASSIC · QUICK MATCH</div>
+        <div class="touch-controls" aria-label="Touch controls">
+          <div class="touch-cluster movement-cluster">
+            <button class="touch-button" data-control="blueLeft" aria-label="Move left">←</button>
+            <button class="touch-button" data-control="blueRight" aria-label="Move right">→</button>
+            <button class="touch-button jump-touch" data-control="blueJump" aria-label="Jump">↑</button>
+          </div>
+          <div class="touch-cluster action-cluster">
+            <button class="touch-button base-touch brace-touch" data-control="blueBrace" aria-label="Brace">BRACE</button>
+            <button class="touch-button base-touch slide-touch" data-control="blueSlide" aria-label="Slide">SLIDE</button>
+            <button class="touch-button base-touch sprint-touch" data-control="blueSprint" aria-label="Sprint">RUN</button>
+            <button class="touch-button base-touch kick-touch" data-control="blueKick" aria-label="Shoot, release to kick">SHOOT</button>
+            <button class="touch-button combat-touch jab-touch" data-control="blueJab" aria-label="Jab">JAB</button>
+            <button class="touch-button combat-touch leg-touch" data-control="blueLeg" aria-label="Leg kick">LEG</button>
+            <button class="touch-button combat-touch uppercut-touch" data-control="blueUppercut" aria-label="Uppercut">UP</button>
+            <button class="touch-button combat-touch sweep-touch" data-control="blueSweep" aria-label="Sweep">SWEEP</button>
+            <button class="touch-button power-touch power-1" data-control="bluePower1" aria-label="Cannon shot">P1</button>
+            <button class="touch-button power-touch power-2" data-control="bluePower2" aria-label="Magnet">P2</button>
+            <button class="touch-button power-touch power-3" data-control="bluePower3" aria-label="Super jump">P3</button>
+            <button class="touch-button power-touch power-4" data-control="bluePower4" aria-label="Freeze">P4</button>
+            <button class="touch-button power-touch power-5" data-control="bluePower5" aria-label="Heal">P5</button>
+            <button class="touch-button touch-mode-button" id="touch-mode-btn" type="button" aria-label="Show combat controls">⚡</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="skill-bar" aria-label="Blue player skills">
+        <div class="skill-bar-head">
+          <span class="skill-bar-title">BLUE SKILLS</span>
+          <div class="skill-energy" aria-label="Energy">
+            <span>ENERGY</span><strong id="skill-energy-value">35 / 100</strong>
+            <div class="skill-energy-meter"><i id="skill-energy-fill"></i></div>
+          </div>
+        </div>
+        <div class="skill-list">
+          <button class="skill-button" type="button" data-control="bluePower1" data-skill="1" aria-label="Cannon Shot, 35 energy, ready" title="Cannon Shot">
+            <span class="skill-icon" aria-hidden="true">⚽</span><span class="skill-key">1</span><span class="skill-name">Cannon Shot</span><span class="skill-cost">35 EN</span><span class="skill-status">READY</span>
+          </button>
+          <button class="skill-button" type="button" data-control="bluePower2" data-skill="2" aria-label="Magnet, ready" title="Magnet">
+            <span class="skill-icon" aria-hidden="true">⊕</span><span class="skill-key">2</span><span class="skill-name">Magnet</span><span class="skill-cost">20 EN</span><span class="skill-status">READY</span>
+          </button>
+          <button class="skill-button" type="button" data-control="bluePower3" data-skill="3" aria-label="Sky Jump, ready" title="Sky Jump">
+            <span class="skill-icon" aria-hidden="true">↟</span><span class="skill-key">3</span><span class="skill-name">Sky Jump</span><span class="skill-cost">15 EN</span><span class="skill-status">READY</span>
+          </button>
+          <button class="skill-button" type="button" data-control="bluePower4" data-skill="4" aria-label="Freeze, ready" title="Freeze">
+            <span class="skill-icon" aria-hidden="true">❄</span><span class="skill-key">4</span><span class="skill-name">Freeze</span><span class="skill-cost">25 EN</span><span class="skill-status">READY</span>
+          </button>
+          <button class="skill-button" type="button" data-control="bluePower5" data-skill="5" aria-label="Heal, ready" title="Heal">
+            <span class="skill-icon heal-icon" aria-hidden="true">+</span><span class="skill-key">5</span><span class="skill-name">Heal</span><span class="skill-cost">20 EN</span><span class="skill-status">READY</span>
+          </button>
+        </div>
+      </section>
+
+      <footer class="game-footer">
+        <div class="brand-block">
+          <span class="eyebrow">MATCH IN PROGRESS</span>
+          <h1>2D Football Wars</h1>
+        </div>
+        <div class="match-settings" aria-label="Match settings">
+          <span id="match-summary">BLUE vs RED</span>
+          <button class="primary-button" id="start-btn" type="button"><span aria-hidden="true">▶</span> RESUME MATCH</button>
+        </div>
+        <div class="tool-actions">
+          <button class="icon-button" id="sound-btn" type="button" aria-label="Turn sound on" title="Sound off"><span aria-hidden="true">♫</span></button>
+          <button class="icon-button" id="restart-btn" type="button" aria-label="Restart match" title="Restart"><span aria-hidden="true">↻</span></button>
+          <button class="icon-button help-button" id="controls-btn" type="button" aria-label="Show controls" title="Controls"><span aria-hidden="true">?</span></button>
+          <button class="icon-button" id="fullscreen-btn" type="button" aria-label="Enter fullscreen" title="Fullscreen"><span aria-hidden="true">⛶</span></button>
+        </div>
+      </footer>
+      <section class="controls-strip" aria-label="Keyboard controls">
+        <span><kbd>A</kbd> <kbd>D</kbd> move</span><span><kbd>W</kbd> jump</span><span><kbd>SPACE</kbd> quick shot · <kbd>E</kbd> charge</span><span><kbd>1</kbd>–<kbd>5</kbd> skills</span><span><kbd>SHIFT</kbd> sprint</span><span><kbd>S</kbd> slide</span><span><kbd>Q</kbd> brace</span><span><kbd>P</kbd> pause</span>
+        <span class="local-controls"><i></i><kbd>←</kbd><kbd>→</kbd> move · <kbd>↑</kbd> jump · <kbd>ENTER</kbd> shoot · <kbd>/</kbd> brace</span>
+      </section>
+      </div>
+    </main>
+
+    <dialog id="help-dialog" class="help-dialog">
+      <div class="dialog-head"><div><span class="eyebrow">ON THE PITCH</span><h2>Controls</h2></div><button class="icon-button" data-close-dialog aria-label="Close controls">×</button></div>
+      <div class="control-columns">
+        <div><h3>Blue player</h3><p><kbd>A</kbd> <kbd>D</kbd> move <kbd>W</kbd> jump</p><p><kbd>SPACE</kbd> quick shot · hold / release <kbd>E</kbd> for a charged shot</p><p><kbd>SHIFT</kbd> sprint <kbd>S</kbd> slide <kbd>Q</kbd> brace</p><p><kbd>1</kbd>–<kbd>5</kbd> powers</p><p><kbd>NUM 6</kbd>–<kbd>9</kbd> strikes</p></div>
+        <div><h3>Red player</h3><p><kbd>←</kbd> <kbd>→</kbd> move <kbd>↑</kbd> jump</p><p><kbd>ENTER</kbd> hold / release shoot</p><p><kbd>RIGHT SHIFT</kbd> sprint <kbd>↓</kbd> slide <kbd>/</kbd> brace</p><p><kbd>6</kbd>–<kbd>0</kbd> powers</p><p><kbd>I</kbd> <kbd>O</kbd> <kbd>K</kbd> <kbd>L</kbd> strikes</p></div>
+      </div>
+      <p class="dialog-note"><kbd>P</kbd> pause <kbd>R</kbd> restart <kbd>F</kbd> fullscreen</p>
+    </dialog>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
