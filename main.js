@@ -1,5 +1,6 @@
-import { FootballGame, POWER_DEFINITIONS } from './engine.js';
+import { FootballGame, POWER_DEFINITIONS, getPlayerRenderPose } from './engine.js';
 import { createMenu } from './menu.js';
+import { applyLocale, getLocale, setLocale, subscribeLocale, t } from './i18n.js';
 import './menu.css';
 import './styles.css';
 
@@ -7,6 +8,7 @@ const canvas = document.querySelector('#game-canvas');
 const ctx = canvas.getContext('2d');
 const $ = (selector) => document.querySelector(selector);
 const game = new FootballGame({ onEvent: handleGameEvent });
+const POWER_LOCALE_KEYS=['power.cannon','power.magnet','power.superJump','power.freeze','power.heal'];
 const input = Object.create(null);
 const heldKeyActions = new Map();
 const heldActionCodes = new Map();
@@ -36,14 +38,19 @@ let impactStrength = 0;
 let sceneTime = 0;
 let cannonTrailUntil = 0;
 let cannonTrailSide = 'blue';
+let stadiumSlogans = [];
+let stadiumSloganLocale = '';
 const menu = createMenu({ onPlay: startGame, onSettings: applySettings, onCosmetic: applyCosmetic });
 const initialProfile=menu.getProfile();
 if(initialProfile.matches===0&&!initialProfile.tutorialSeen&&initialProfile.settings.difficulty==='normal')menu.setSetting('difficulty','easy');
 
 function handleGameEvent(event) {
-  const shotLabel = event?.type === 'kick' ? (event.powered ? 'CANNON STRIKE!' : event.quick ? 'DRIVE SHOT!' : 'CURVE SHOT!') : null;
-  const skillNames=['炮击必杀','吸球','高跳','冻结','回血'];
-  const labels = { goal: event?.ownGoal ? 'OWN GOAL!' : 'GOOOAL!', power: `${skillNames[(event?.power??1)-1]??'技能'} 已发动`, power_denied: powerDeniedLabel(event), heal: `回血 +${event?.healthRestored??0} 生命 · +${event?.staminaRestored??0} 体力`, end: event?.winnerSide ? `${event.winnerSide.toUpperCase()} WINS` : 'FULL TIME' };
+  const shotLabel = event?.type === 'kick'
+    ? event.skillPower === 'cannon' ? t('event.cannon') : event.quick ? t('event.loft') : event.lofted ? t('event.highVolley') : event.powered ? t('event.powerShot') : t('event.curveShot')
+    : null;
+  const powerName=t(POWER_LOCALE_KEYS[(event?.power??1)-1]??'menu.tab.powers');
+  const powerLabel = event?.power === 1 ? (event.armed ? t('event.cannonArmed') : t('event.cannon')) : t('event.powerActivated',{name:powerName});
+  const labels = { goal: event?.ownGoal ? t('event.ownGoal') : t('event.goal'), power: powerLabel, power_denied: powerDeniedLabel(event), heal: t('event.heal',{health:event?.healthRestored??0,stamina:event?.staminaRestored??0}), end: event?.winnerSide === 'blue' ? t('event.blueWins') : event?.winnerSide === 'red' ? t('event.redWins') : t('event.fullTime') };
   if (shotLabel) labels.kick = shotLabel;
   const skillNotice=event?.type==='power'&&event.power>=1&&event.power<=5||event?.type==='power_denied'||event?.type==='heal';
   if(skillNotice)skillNoticeUntil=performance.now()+1400;
@@ -53,11 +60,17 @@ function handleGameEvent(event) {
   const healActivationEcho=event?.type==='power'&&event.power===5&&performance.now()<healNoticeUntil;
   if (labels[event?.type]&&!ordinaryKickDuringSkillNotice&&!healActivationEcho) {
     if(priorityOverride)skillNoticeUntil=0;
-    $('#match-message').textContent = labels[event.type];
-    $('#match-message').classList.add('visible');
+    const message=$('#match-message');
+    message.textContent = labels[event.type];
+    const cannonFeedback=event.type==='kick'&&event.skillPower==='cannon'||event.type==='power'&&event.power===1;
+    const loftFeedback=event.type==='kick'&&event.quick;
+    message.style.color=cannonFeedback?'#ffe47b':loftFeedback?'#a8ecff':'';
+    message.style.borderColor=cannonFeedback?'#f5bc4e':loftFeedback?'#73d9f4':'';
+    message.style.boxShadow=cannonFeedback?'0 0 22px #ffbb4745':loftFeedback?'0 0 18px #5fdafa30':'';
+    message.classList.add('visible');
     clearTimeout(eventTimer);
     const skillMessage=skillNotice||event?.type==='kick'&&event.skillPower==='cannon';
-    eventTimer = setTimeout(() => $('#match-message').classList.remove('visible'), event.type === 'goal' ? 1800 : event.type === 'kick' ? 900 : skillMessage ? 1400 : 850);
+    eventTimer = setTimeout(() => {message.classList.remove('visible');message.style.color='';message.style.borderColor='';message.style.boxShadow='';}, event.type === 'goal' ? 1800 : event.type === 'kick' ? 900 : skillMessage ? 1400 : 850);
   }
   if (event?.type === 'kick' || event?.type === 'goal' || event?.type === 'hit') {
     const now=performance.now();
@@ -81,15 +94,14 @@ function handleGameEvent(event) {
 }
 
 function powerDeniedLabel(event) {
-  const names=['炮击必杀','吸球','高跳','冻结','回血'];
-  const name=names[(event?.power??1)-1]??'技能';
+  const name=t(POWER_LOCALE_KEYS[(event?.power??1)-1]??'menu.tab.powers');
   const reason = event?.reason;
-  if (reason === 'energy') return `${name} · 需要 ${event.cost ?? 0} 能量（当前 ${Math.floor(event.energy ?? 0)}）`;
-  if (reason === 'range') return `${name} · 对手需在 ${Math.round(event.requiredRange ?? 0)} 范围内`;
-  if (reason === 'cooldown') return `${name} · 冷却 ${Math.ceil(event.remaining ?? 0)} 秒`;
-  if (reason === 'full_health') return `${name} · 生命与体力已满`;
-  if (reason === 'down') return `${name} · 起身后才能使用`;
-  return `${name} · 暂不可用`;
+  if (reason === 'energy') return `${name} · ${t('hud.needEnergy',{cost:event.cost??0,energy:Math.floor(event.energy??0)})}`;
+  if (reason === 'range') return `${name} · ${t('hud.needRange',{range:Math.round(event.requiredRange??0)})}`;
+  if (reason === 'cooldown') return `${name} · ${t('hud.cooldownReason',{seconds:Math.ceil(event.remaining??0)})}`;
+  if (reason === 'full_health') return `${name} · ${t('hud.healthStaminaFull')}`;
+  if (reason === 'down') return `${name} · ${t('hud.waitToStand')}`;
+  return `${name} · ${t('hud.unavailable')}`;
 }
 
 function playSound(type) {
@@ -122,12 +134,12 @@ function syncHUD(state) {
   $('#red-score').textContent = scores[1] ?? 0;
   const remaining = Math.max(0, Math.ceil(state.remaining ?? 60));
   $('#clock').textContent = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
-  $('#match-label').textContent = state.mode === 'replay' ? 'INSTANT REPLAY' : state.overtime ? 'GOLDEN GOAL' : (state.rules === 'trials' ? 'SKILL TRIAL' : state.matchType === 'local' ? '2 PLAYER MATCH' : 'QUICK MATCH');
+  $('#match-label').textContent = state.mode === 'replay' ? t('game.replay') : state.overtime ? t('game.goldenGoal') : (state.rules === 'trials' ? t('game.skillTrial') : state.matchType === 'local' ? t('game.twoPlayerMatch') : t('game.quickMatch'));
   const pause = $('#pause-btn');
-  pause.setAttribute('aria-label', state.mode === 'paused' ? 'Resume match' : 'Pause match');
-  pause.title = state.mode === 'paused' ? 'Resume match' : 'Pause match';
+  pause.setAttribute('aria-label', t(state.mode === 'paused' ? 'game.resumeAria' : 'game.pause'));
+  pause.title = t(state.mode === 'paused' ? 'game.resumeAria' : 'game.pause');
   pause.querySelector('span').textContent = state.mode === 'paused' ? '▶' : 'Ⅱ';
-  $('#start-btn').innerHTML = state.mode === 'paused' ? '<span aria-hidden="true">▶</span> RESUME MATCH' : '<span aria-hidden="true">●</span> MATCH LIVE';
+  $('#start-btn').innerHTML = state.mode === 'paused' ? `<span aria-hidden="true">▶</span> ${t('game.resume')}` : `<span aria-hidden="true">●</span> ${t('game.matchLive')}`;
   const players = state.players ?? [];
   ['blue','red'].forEach((side,index)=>{
     const player=players[index]??{};
@@ -137,27 +149,77 @@ function syncHUD(state) {
     $(`#${side}-stamina`).style.width=`${stamina}%`;
     $(`#${side}-player-name`).textContent=player.number??(index+1);
     const flags=[];
-    if(player.downTime>0)flags.push('DOWN');
-    else if(player.brace)flags.push('BRACE');
-    else if(player.sprint)flags.push('SPRINT');
-    if(player.charge>0.05)flags.push(`CHARGE ${Math.round(player.charge*100)}%`);
+    if(player.downTime>0)flags.push(t('hud.down'));
+    else if(player.brace)flags.push(t('hud.brace'));
+    else if(player.sprint)flags.push(t('hud.sprint'));
+    if(player.charge>0.05)flags.push(t('hud.charge',{percent:Math.round(player.charge*100)}));
     $(`#${side}-state`).textContent=flags.join(' · ');
   });
-  const arenaLabels={classic:'CLASSIC STADIUM',night:'NIGHT MATCH',neon:'NEON ARENA'};
-  const ruleLabels={classic:'QUICK MATCH',chaos:'CHAOS',trials:'SKILL TRIAL',ghost:'GHOST RUN'};
-  $('#arena-mode-label').textContent=`${arenaLabels[state.arena??arenaName]??String(state.arena??arenaName).toUpperCase()} · ${ruleLabels[state.rules]??'QUICK MATCH'}${state.goldenGoal?' · GOLDEN GOAL':''}`;
+  const arenaLabels={classic:'game.classicStadium',night:'game.nightMatch',neon:'game.neonArena'};
+  const ruleLabels={classic:'game.quickMatch',chaos:'game.chaos',trials:'game.skillTrial',ghost:'game.ghostRun'};
+  $('#arena-mode-label').textContent=`${t(arenaLabels[state.arena??arenaName]??'game.classicStadium')} · ${t(ruleLabels[state.rules]??'game.quickMatch')}${state.goldenGoal?' · '+t('game.goldenGoal'):''}`;
   const localMatch=state.matchType==='local'&&state.rules!=='trials';
-  $('#match-summary').textContent=localMatch?'BLUE PLAYER vs RED PLAYER':`BLUE vs CPU · ${String(state.difficulty??'normal').toUpperCase()}`;
-  $('#controls-primary').innerHTML=localMatch?'<kbd>A</kbd>/<kbd>D</kbd> 蓝方移动 · <kbd>W</kbd> 跳':'<kbd>←</kbd>/<kbd>→</kbd> 移动 · <kbd>↑</kbd> 跳 · <kbd>↓</kbd> 铲';
-  $('#controls-shot').innerHTML=localMatch?'<kbd>SPACE</kbd> 快射 · <kbd>E</kbd> 蓄力':'<kbd>X</kbd>/<kbd>SPACE</kbd> 快射 · <kbd>E</kbd>/<kbd>ENTER</kbd> 蓄力';
-  $('#controls-skill').innerHTML=localMatch?'<kbd>1</kbd>–<kbd>5</kbd> 蓝方技能':'<kbd>Z</kbd> <kbd>C</kbd> <kbd>V</kbd> <kbd>B</kbd> <kbd>N</kbd> 技能';
-  $('#controls-extra').innerHTML=localMatch?'<kbd>SHIFT</kbd> 冲刺 · <kbd>S</kbd> 铲球 · <kbd>Q</kbd> 防守':'<kbd>SHIFT</kbd> 冲刺 · <kbd>Q</kbd> 防守';
+  $('#match-summary').textContent=localMatch?t('game.bluePlayer'):t('game.blueVsCpu',{difficulty:t(`difficulty.${state.difficulty??'normal'}`)});
+  $('#controls-primary').innerHTML=localMatch?`<kbd>A</kbd>/<kbd>D</kbd> ${t('game.blue')} · <kbd>W</kbd> ${t('controls.jump')}`:`<kbd>←</kbd>/<kbd>→</kbd> ${t('controls.move')} · <kbd>↑</kbd> ${t('controls.jump')} · <kbd>↓</kbd> ${t('controls.slide')}`;
+  $('#controls-shot').innerHTML=localMatch?`<kbd>SPACE</kbd> ${t('controls.quick')} · <kbd>E</kbd> ${t('controls.charge')}`:`<kbd>X</kbd>/<kbd>SPACE</kbd> ${t('controls.loft')} · <kbd>E</kbd>/<kbd>ENTER</kbd> ${t('controls.charge')}`;
+  $('#controls-skill').innerHTML=localMatch?`<kbd>1</kbd>–<kbd>5</kbd> ${t('game.blue')} ${t('controls.abilities')}`:`<kbd>Z</kbd> <kbd>C</kbd> <kbd>V</kbd> <kbd>B</kbd> <kbd>N</kbd> ${t('controls.abilities')}`;
+  $('#controls-extra').innerHTML=localMatch?`<kbd>SHIFT</kbd> ${t('controls.sprint')} · <kbd>S</kbd> ${t('controls.slide')} · <kbd>Q</kbd> ${t('controls.brace')}`:`<kbd>SHIFT</kbd> ${t('controls.sprint')} · <kbd>Q</kbd> ${t('controls.brace')}`;
   const secondary=$('#controls-secondary');
   secondary.hidden=!localMatch;
-  secondary.innerHTML='<i></i><kbd>←</kbd>/<kbd>→</kbd> 红方移动 · <kbd>↑</kbd>跳 · <kbd>↓</kbd>铲 · <kbd>ENTER</kbd>射门 · <kbd>/</kbd>防守 · <kbd>6</kbd>–<kbd>0</kbd>技能';
+  secondary.innerHTML=`<i></i><kbd>←</kbd>/<kbd>→</kbd> ${t('game.red')} ${t('controls.move')} · <kbd>↑</kbd>${t('controls.jump')} · <kbd>↓</kbd>${t('controls.slide')} · <kbd>ENTER</kbd>${t('controls.shoot')} · <kbd>/</kbd>${t('controls.brace')} · <kbd>6</kbd>–<kbd>0</kbd>${t('controls.abilities')}`;
   syncSkillBar(state);
-  if (state.mode === 'paused') { clearInput(); $('#match-message').textContent='PAUSED'; $('#match-message').classList.add('visible'); }
-  else if ($('#match-message').textContent === 'PAUSED') $('#match-message').classList.remove('visible');
+  if (state.mode === 'paused') { clearInput(); $('#match-message').textContent=t('game.paused'); $('#match-message').classList.add('visible'); }
+  else if ($('#match-message').textContent === t('game.paused')) $('#match-message').classList.remove('visible');
+}
+
+function syncHelpDialog() {
+  const localMatch=snapshot().matchType==='local'&&snapshot().rules!=='trials';
+  $('#help-eyebrow').textContent=t('help.onPitch');
+  $('#help-title').textContent=t('help.title');
+  $('[data-close-dialog]').setAttribute('aria-label',t('controls.close'));
+  const columns=$('#help-columns');
+  columns.innerHTML=localMatch
+    ? `<div><h3>${t('help.bluePlayer')}</h3><p><kbd>A</kbd> <kbd>D</kbd> ${t('controls.move')} <kbd>W</kbd> ${t('controls.jump')}</p><p><kbd>SPACE</kbd> ${t('controls.quick')} · ${t('help.holdRelease')} <kbd>E</kbd> ${t('controls.charge')}</p><p><kbd>SHIFT</kbd> ${t('controls.sprint')} <kbd>S</kbd> ${t('controls.slide')} <kbd>Q</kbd> ${t('controls.brace')}</p><p><kbd>1</kbd>–<kbd>5</kbd> ${t('controls.abilities')}</p><p><kbd>Z</kbd>/<kbd>X</kbd>/<kbd>C</kbd>/<kbd>V</kbd> ${t('help.strikes')}</p></div><div><h3>${t('help.redPlayer')}</h3><p><kbd>←</kbd> <kbd>→</kbd> ${t('controls.move')} <kbd>↑</kbd> ${t('controls.jump')}</p><p><kbd>ENTER</kbd> ${t('help.holdRelease')} ${t('controls.shoot')}</p><p><kbd>RIGHT SHIFT</kbd> ${t('controls.sprint')} <kbd>↓</kbd> ${t('controls.slide')} <kbd>/</kbd> ${t('controls.brace')}</p><p><kbd>6</kbd>–<kbd>0</kbd> ${t('controls.abilities')}</p><p><kbd>I</kbd> <kbd>O</kbd> <kbd>K</kbd> <kbd>L</kbd> ${t('help.strikes')}</p></div>`
+    : `<div><h3>${t('help.bluePlayer')}</h3><p><kbd>←</kbd> <kbd>→</kbd> ${t('controls.move')} <kbd>↑</kbd> ${t('controls.jump')} · <kbd>↓</kbd> ${t('controls.slide')}</p><p><kbd>X</kbd> / <kbd>SPACE</kbd> ${t('controls.loft')} · ${t('help.nearGoalShot')}</p><p><kbd>E</kbd> ${t('help.holdRelease')} ${t('controls.charge')}</p><p><kbd>SHIFT</kbd> ${t('controls.sprint')} <kbd>Q</kbd> ${t('controls.brace')}</p><p><kbd>Z</kbd> ${t('power.cannon')} · <kbd>C</kbd> ${t('power.magnet')} · <kbd>V</kbd> ${t('power.superJump')} · <kbd>B</kbd> ${t('power.freeze')} · <kbd>N</kbd> ${t('power.heal')}</p></div><div><h3>${t('controls.pause')}</h3><p><kbd>P</kbd> ${t('controls.pause')} <kbd>R</kbd> ${t('game.restart')} <kbd>F</kbd> ${t('game.fullscreen')}</p><p>${t('controls.loft')} · ${t('help.nearGoalShot')}</p><p><kbd>1</kbd>–<kbd>5</kbd> ${t('controls.abilities')}</p></div>`;
+  $('#help-note').innerHTML=`<kbd>P</kbd> ${t('controls.pause')} · <kbd>R</kbd> ${t('game.restart')} · <kbd>F</kbd> ${t('game.fullscreen')}`;
+}
+
+function syncLocaleChrome() {
+  refreshStadiumSlogans();
+  const localeButton=$('#locale-btn');
+  const targetLocale=getLocale()==='en'?'zh-CN':'en';
+  localeButton.textContent=targetLocale==='zh-CN'?'中文':'EN';
+  localeButton.setAttribute('aria-label',t('menu.localeToggle'));
+  localeButton.title=t('language.label');
+  syncTouchLabels();
+  syncHelpDialog();
+  skillBarSignature='';
+  syncHUD(snapshot());
+}
+
+function refreshStadiumSlogans() {
+  const locale=getLocale();
+  if(locale===stadiumSloganLocale)return;
+  stadiumSlogans=[t('canvas.goalSlogan'),t('canvas.sloganClassic'),t('canvas.kickHeadWin'),t('canvas.powerUp'),t('canvas.sloganWars')];
+  stadiumSloganLocale=locale;
+}
+
+function syncTouchLabels() {
+  const labels={
+    blueLeft:['touch.left',null],blueRight:['touch.right',null],blueJump:['touch.jump',null],
+    blueBrace:['touch.brace','touch.braceShort'],blueSlide:['touch.slide','touch.slideShort'],blueSprint:['touch.sprint','touch.sprintShort'],blueKick:['touch.shoot','touch.shootShort'],
+    blueJab:['touch.jab','touch.jabShort'],blueLeg:['touch.leg','touch.legShort'],blueUppercut:['touch.uppercut','touch.uppercutShort'],blueSweep:['touch.sweep','touch.sweepShort'],
+    bluePower1:['touch.cannon','touch.cannonShort'],bluePower2:['touch.magnet','touch.magnetShort'],bluePower3:['touch.superJump','touch.jumpShort'],bluePower4:['touch.freeze','touch.freezeShort'],bluePower5:['touch.heal','touch.healShort'],
+  };
+  Object.entries(labels).forEach(([control,[ariaKey,textKey]])=>{
+    const button=$(`[data-control="${control}"]`);
+    if(!button)return;
+    button.setAttribute('aria-label',t(ariaKey));
+    if(textKey)button.textContent=t(textKey);
+  });
+  const modeButton=$('#touch-mode-btn');
+  modeButton.textContent=touchCombatMode?t('touch.ball'):'⚡';
+  modeButton.setAttribute('aria-label',t(touchCombatMode?'touch.backFootball':'touch.showCombat'));
 }
 
 let skillBarSignature='';
@@ -171,7 +233,9 @@ function syncSkillBar(state) {
   const localMatch=state.matchType==='local'&&state.rules!=='trials';
   const skillBar=$('.skill-bar');
   skillBar.dataset.matchType=localMatch?'local':'ai';
-  $('.skill-bar-hint').textContent=localMatch?'双人蓝方：技能按 1–5':'单人：Z/C/V/B/N（数字 1–5 兼容）';
+  $('.skill-bar-hint').textContent=t(localMatch?'hud.localSkillHint':'hud.soloSkillHint');
+  $('.skill-bar-title').textContent=t('hud.skillTitle');
+  $('.skill-energy-label').textContent=t('hud.skillEnergy');
   const energySignature=`${Math.round(energy)}`;
   if(energySignature!==skillEnergySignature){
     skillEnergySignature=energySignature;
@@ -191,7 +255,7 @@ function syncSkillBar(state) {
   })].join('|');
   names.forEach((definition)=>{
     const cost=$(`[data-skill="${definition.id}"] .skill-cost`);
-    const label=`${definition.cost} 能量`;
+    const label=t('hud.skillCost',{cost:definition.cost});
     if(cost&&cost.textContent!==label)cost.textContent=label;
   });
   if(signature===skillBarSignature)return;
@@ -205,26 +269,28 @@ function syncSkillBar(state) {
     if(alternate)alternate.hidden=localMatch;
     const cooldown=player.powerCooldowns?.[index]??player.abilities?.[index]??0;
     const active=Math.max(activeDurations[index]??0,index===0?(player.cannonTime??0):index===1?(player.magnetTime??0):index===2?(player.superJumpTime??0):index===3?(state.players?.[1]?.freezeTime??0):(player.shieldTime??0));
-    let stateText='可用';
-    if(index===0&&(player.cannonTime??0)>0)stateText=`已蓄炮 ${player.cannonTime.toFixed(1)}秒`;
-    else if(active>0)stateText=`生效 ${active.toFixed(1)}秒`;
-    else if(cooldown>0)stateText=`冷却 ${cooldown.toFixed(cooldown<10?1:0)}秒`;
-    else if(energy<definition.cost)stateText=`差 ${Math.ceil(definition.cost-energy)} 能量`;
-    else if(definition.id===4&&freezeDistance>definition.range)stateText='对手太远';
-    else if(definition.id===5&&player.health>=100&&player.stamina>=100)stateText='状态已满';
+    let stateText=t('hud.skillReady');
+    if(index===0&&(player.cannonTime??0)>0)stateText=t('hud.armedShort',{seconds:player.cannonTime.toFixed(1)});
+    else if(active>0)stateText=t('hud.activeSeconds',{seconds:active.toFixed(1)});
+    else if(cooldown>0)stateText=t('hud.coolingSeconds',{seconds:cooldown.toFixed(cooldown<10?1:0)});
+    else if(energy<definition.cost)stateText=t('hud.needMoreEnergy',{amount:Math.ceil(definition.cost-energy)});
+    else if(definition.id===4&&freezeDistance>definition.range)stateText=t('hud.opponentFarShort');
+    else if(definition.id===5&&player.health>=100&&player.stamina>=100)stateText=t('hud.healthFullShort');
     button.querySelector('.skill-status').textContent=stateText;
-    const chineseName=['炮击必杀','吸球','高跳','冻结','回血'][index];
-    button.setAttribute('aria-label',`${definition.name}（${chineseName}），${definition.cost} 点能量，${stateText}`);
-    button.title=`${chineseName} · ${definition.description} · 消耗 ${definition.cost} 能量 · ${stateText}`;
+    const skillName=t(POWER_LOCALE_KEYS[index]);
+    button.setAttribute('aria-label',`${skillName}, ${t('hud.skillCost',{cost:definition.cost})}, ${stateText}`);
+    button.title=`${skillName} · ${t(`power.${['cannonCopy','magnetCopy','superJumpCopy','freezeCopy','healCopy'][index]}`)} · ${t('hud.skillCost',{cost:definition.cost})} · ${stateText}`;
     button.dataset.cooldown=cooldown>0?'true':'false';
     button.dataset.active=active>0?'true':'false';
-    button.dataset.waiting=stateText.startsWith('差 ')||stateText==='对手太远'||stateText==='状态已满'?'true':'false';
+    button.dataset.waiting=energy<definition.cost||definition.id===4&&freezeDistance>definition.range||definition.id===5&&player.health>=100&&player.stamina>=100?'true':'false';
   });
 }
 
 function drawStadium(state) {
+  refreshStadiumSlogans();
   const w = canvas.width, h = canvas.height;
-  const horizon = 260, railY = 490, fieldY = 520, floorY = 830;
+  const horizon = 260, railY = 490, fieldY = 520, floorY = state.coordinates?.floorY ?? 830;
+  const goal=state.coordinates?.goal;
   const arena=state.arena??arenaName;
   const palette={night:{sky1:'#182345',sky2:'#42517d',far:'#28375e',near:'#202d50',stands:'#303649',rail:'#070a15',turf1:'#285c6a',turf2:'#183b56',turf3:'#101e37'},neon:{sky1:'#241b54',sky2:'#483575',far:'#3e3378',near:'#2e285d',stands:'#34334c',rail:'#100f23',turf1:'#25765e',turf2:'#145246',turf3:'#0b363b'}};
   const colors=palette[arena]??{sky1:'#70b8ec',sky2:'#c6e8ff',far:'#92afd0',near:'#7f9ebf',stands:'#737b89',rail:'#070c15',turf1:'#278846',turf2:'#147335',turf3:'#0d592e'};
@@ -239,9 +305,8 @@ function drawStadium(state) {
   ctx.fillStyle = '#414754'; ctx.fillRect(0, railY - 10, w, 12);
   ctx.fillStyle = colors.rail; ctx.fillRect(0, railY, w, 34);
   ctx.font = '900 22px system-ui, sans-serif'; ctx.fillStyle = arena === 'neon' ? '#7dffc3' : '#31bf79'; ctx.textBaseline = 'middle';
-  const slogans = ['⚽  GOOOAL!', 'CLASSIC STADIUM', 'KICK · HEAD · WIN', '★  POWER UP', '2D FOOTBALL WARS'];
   const positions = [110, 390, 705, 1040, 1320];
-  slogans.forEach((word, i) => ctx.fillText(word, positions[i], railY + 17));
+  stadiumSlogans.forEach((word, i) => ctx.fillText(word, positions[i], railY + 17));
 
   const turf = ctx.createLinearGradient(0, fieldY, 0, h);
   turf.addColorStop(0, colors.turf1); turf.addColorStop(.48, colors.turf2); turf.addColorStop(1, colors.turf3);
@@ -249,7 +314,7 @@ function drawStadium(state) {
   for (let x = 0; x < w; x += 22) { ctx.fillStyle = x % 44 ? '#ffffff08' : arena === 'neon' ? '#99ffdd17' : '#8aff3b0b'; ctx.fillRect(x, fieldY + 34, 11, h - fieldY); }
   ctx.strokeStyle = '#f3f7f0aa'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(0, floorY); ctx.lineTo(w, floorY); ctx.moveTo(w/2, fieldY + 34); ctx.lineTo(w/2, floorY); ctx.stroke();
   ctx.beginPath(); ctx.ellipse(w/2, floorY - 28, 106, 42, 0, 0, Math.PI*2); ctx.stroke();
-  drawGoal(0, 650, 90, 180); drawGoal(w - 90, 650, 90, 180);
+  if(goal){drawGoal(goal,floorY,'left');drawGoal(goal,floorY,'right');}
 
   const players = state.players ?? [];
   players.forEach((player,index)=>{
@@ -297,29 +362,84 @@ function drawCrowd(x, y, width, height, seed, base='#737b89') {
   }
 }
 
-function drawGoal(x, y, width, height) {
-  ctx.save(); ctx.strokeStyle = '#e8edf4a8'; ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + width, y); ctx.lineTo(x + width, y + height); ctx.stroke();
-  ctx.strokeStyle = '#ffffff33'; ctx.lineWidth = 1;
-  for (let i = 1; i < 7; i++) { ctx.beginPath(); ctx.moveTo(x + i*width/7,y); ctx.lineTo(x + i*width/7,y+height);ctx.stroke(); }
-  for (let i = 1; i < 6; i++) { ctx.beginPath();ctx.moveTo(x,y+i*height/6);ctx.lineTo(x+width,y+i*height/6);ctx.stroke(); }
+function drawGoal(geometry,floorY,side) {
+  const {topY,bottomY,depth,leftLineX,rightLineX}=geometry;
+  const left=side==='left';
+  const lineX=left?leftLineX:rightLineX;
+  const backX=left?Math.max(0,lineX-depth):Math.min(canvas.width,lineX+depth);
+  const x=Math.min(lineX,backX),width=Math.abs(lineX-backX),height=bottomY-topY;
+  if(width<=0||height<=0||floorY<=bottomY)return;
+  ctx.save();
+  ctx.lineJoin='round';ctx.lineCap='square';
+  const frameHalf=8.5;
+  const frameTop=topY-frameHalf,frameBottom=bottomY+frameHalf;
+  const mouthFrameX=lineX+(left?frameHalf:-frameHalf);
+
+  const netFill=ctx.createLinearGradient(x,topY,x+width,bottomY);
+  netFill.addColorStop(0,'#071219ba');netFill.addColorStop(1,'#152a30a8');
+  ctx.fillStyle=netFill;ctx.fillRect(x,topY,width,height);
+  ctx.strokeStyle='#dff9f252';ctx.lineWidth=2;
+  for(let i=1;i<7;i++){
+    const strandX=x+width*i/7;
+    ctx.beginPath();ctx.moveTo(strandX,topY+4);ctx.lineTo(strandX,bottomY-4);ctx.stroke();
+  }
+  for(let i=1;i<12;i++){
+    const strandY=topY+height*i/12;
+    ctx.beginPath();ctx.moveTo(x+3,strandY);ctx.lineTo(lineX,strandY);ctx.stroke();
+  }
+  ctx.strokeStyle='#efffff4d';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(x,topY+6);ctx.lineTo(lineX,topY+20);ctx.moveTo(x,bottomY-5);ctx.lineTo(lineX,bottomY-20);ctx.stroke();
+
+  const platformHeight=floorY-bottomY;
+  const platform=ctx.createLinearGradient(0,bottomY,0,floorY);
+  platform.addColorStop(0,'#348b49');platform.addColorStop(.16,'#28763e');platform.addColorStop(1,'#174b35');
+  ctx.fillStyle=platform;ctx.fillRect(x,bottomY,width,platformHeight);
+  ctx.fillStyle='#a6ef69';ctx.fillRect(x,bottomY,width,3);
+  ctx.fillStyle='#4fbe62';ctx.fillRect(x,bottomY+3,width,7);
+  ctx.strokeStyle='#b7dc865e';ctx.lineWidth=2;
+  for(let row=1;row<Math.ceil(platformHeight/26);row++){
+    const brickY=bottomY+8+row*26;
+    if(brickY>=floorY)break;
+    ctx.beginPath();ctx.moveTo(x,brickY);ctx.lineTo(x+width,brickY);ctx.stroke();
+    const shift=row%2?width*.25:0;
+    for(let col=0;col<4;col++){
+      const brickX=x+shift+col*width/4;
+      if(brickX>x&&brickX<x+width){ctx.beginPath();ctx.moveTo(brickX,brickY-25);ctx.lineTo(brickX,brickY);ctx.stroke();}
+    }
+  }
+  ctx.fillStyle='#102d2b';ctx.fillRect(x,floorY-8,width,8);
+
+  ctx.strokeStyle='#17252c';ctx.lineWidth=17;
+  ctx.beginPath();ctx.moveTo(x,frameTop);ctx.lineTo(mouthFrameX,frameTop);ctx.lineTo(mouthFrameX,frameBottom);ctx.lineTo(x,frameBottom);ctx.closePath();ctx.stroke();
+  ctx.strokeStyle='#f4f7fb';ctx.lineWidth=10;
+  ctx.beginPath();ctx.moveTo(x,frameTop);ctx.lineTo(mouthFrameX,frameTop);ctx.lineTo(mouthFrameX,frameBottom);ctx.lineTo(x,frameBottom);ctx.closePath();ctx.stroke();
+  ctx.strokeStyle='#aeeaff';ctx.lineWidth=2;
+  const frontAccentX=mouthFrameX+(left?-1:1);
+  ctx.beginPath();ctx.moveTo(x,frameTop+1);ctx.lineTo(frontAccentX,frameTop+1);ctx.lineTo(frontAccentX,frameBottom-1);ctx.stroke();
+  ctx.fillStyle='#fff';
+  for(const [jointX,jointY] of [[x,frameTop],[mouthFrameX,frameTop],[mouthFrameX,frameBottom],[x,frameBottom]]){
+    ctx.beginPath();ctx.arc(jointX,jointY,7,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='#30434c';ctx.lineWidth=2;ctx.stroke();
+  }
   ctx.restore();
 }
 
 function drawPlayer(player, cap, shirt, fallbackNumber) {
   if (!player || player.active === false) return;
   const x = player.x, feet = player.y, facing = player.facing ?? 1;
-  const now=sceneTime*1000, speed=Math.min(1,Math.abs(player.vx??0)/360), phase=sceneTime*(player.sprint?11:8)+(player.number??0), airborne=Math.max(0,Math.min(1,(830-feet)/135));
+  const pose=getPlayerRenderPose(player,sceneTime);
+  const {airborne,lean,localShiftX}=pose;
+  const head=pose.headLocal;
+  const now=sceneTime*1000, speed=Math.min(1,Math.abs(player.vx??0)/360), phase=sceneTime*(player.sprint?11:8)+(player.number??0);
   const kickT=player.kick>0?1-player.kick/.34:0, kickPhase=Math.sin(Math.min(1,kickT*1.45)*Math.PI/2), kickLift=kickPhase*30, kickReach=kickPhase*52;
-  const lean=-(player.charge??0)*10+(player.kick>0?facing*19:Math.sin(phase)*speed*5);
   const skin='#e9ad83', dark='#182235', boot='#f3f6f8';
-  ctx.save(); ctx.translate(x, feet); ctx.scale(1.24,1.24);
+  ctx.save(); ctx.translate(x, feet); ctx.scale(pose.scale,pose.scale);
   ctx.fillStyle='#071a1688'; ctx.beginPath(); ctx.ellipse(0, 2, 39*(1-airborne*.28), 8, 0, 0, Math.PI*2); ctx.fill();
-  ctx.translate(-facing*lean,0);
+  ctx.translate(localShiftX,0);
 
   if((player.superJumpTime??0)>0&&airborne>.05){
     ctx.save();ctx.globalAlpha=.11+.1*Math.sin(now/45);ctx.fillStyle=cap;
-    [-1,-2,-3].forEach((trail)=>{const offset=trail*13;ctx.beginPath();ctx.roundRect(-31,-143+airborne*3+offset,62,79,17);ctx.fill();ctx.beginPath();ctx.ellipse(0,-173+airborne*7+offset,23,28,0,0,Math.PI*2);ctx.fill();});ctx.restore();
+    [-1,-2,-3].forEach((trail)=>{const offset=trail*13;ctx.beginPath();ctx.roundRect(-31,-143+airborne*3+offset,62,79,17);ctx.fill();ctx.beginPath();ctx.ellipse(head.x,head.y+offset,23,28,0,0,Math.PI*2);ctx.fill();});ctx.restore();
   }
 
   const stride=Math.sin(phase)*speed*(1-airborne*.55);
@@ -355,12 +475,12 @@ function drawPlayer(player, cap, shirt, fallbackNumber) {
   };
   drawArms(dark,19);drawArms(skin,13);
 
-  ctx.fillStyle=skin;ctx.beginPath();ctx.ellipse(0,-173+airborne*7,26,31,0,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle=dark;ctx.beginPath();ctx.moveTo(-24,-184+airborne*7);ctx.quadraticCurveTo(-27,-212+airborne*7,2,-209+airborne*7);ctx.quadraticCurveTo(29,-205+airborne*7,27,-178+airborne*7);ctx.lineTo(20,-190+airborne*7);ctx.lineTo(12,-180+airborne*7);ctx.lineTo(6,-195+airborne*7);ctx.lineTo(-3,-180+airborne*7);ctx.lineTo(-12,-194+airborne*7);ctx.lineTo(-19,-177+airborne*7);ctx.closePath();ctx.fill();
-  ctx.fillStyle=cap;ctx.fillRect(-25,-181+airborne*7,50,7);
-  const eyeX=facing*10;ctx.fillStyle='#fff';ctx.beginPath();ctx.ellipse(eyeX,-171+airborne*7,7,9,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#192335';ctx.beginPath();ctx.arc(eyeX+facing*2,-170+airborne*7,3.4,0,Math.PI*2);ctx.fill();
-  ctx.strokeStyle=dark;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(eyeX-7,-184+airborne*7);ctx.lineTo(eyeX+8,-187+airborne*7);ctx.stroke();
-  ctx.strokeStyle='#874f40';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(facing*7,-153+airborne*7);ctx.lineTo(facing*17,-155+airborne*7);ctx.stroke();
+  ctx.fillStyle=skin;ctx.beginPath();ctx.ellipse(head.x,head.y,head.rx,head.ry,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=dark;ctx.beginPath();ctx.moveTo(head.x-24,head.y-11);ctx.quadraticCurveTo(head.x-27,head.y-39,head.x+2,head.y-36);ctx.quadraticCurveTo(head.x+29,head.y-32,head.x+27,head.y-5);ctx.lineTo(head.x+20,head.y-17);ctx.lineTo(head.x+12,head.y-7);ctx.lineTo(head.x+6,head.y-22);ctx.lineTo(head.x-3,head.y-7);ctx.lineTo(head.x-12,head.y-21);ctx.lineTo(head.x-19,head.y-4);ctx.closePath();ctx.fill();
+  ctx.fillStyle=cap;ctx.fillRect(head.x-25,head.y-8,50,7);
+  const eyeX=head.x+facing*10;ctx.fillStyle='#fff';ctx.beginPath();ctx.ellipse(eyeX,head.y+2,7,9,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#192335';ctx.beginPath();ctx.arc(eyeX+facing*2,head.y+3,3.4,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle=dark;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(eyeX-7,head.y-11);ctx.lineTo(eyeX+8,head.y-14);ctx.stroke();
+  ctx.strokeStyle='#874f40';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(head.x+facing*7,head.y+20);ctx.lineTo(head.x+facing*17,head.y+18);ctx.stroke();
   if (player.charge > 0.05 || player.super > 0 || player.shieldTime > 0 || player.cannonTime > 0 || player.magnetTime > 0 || player.superJumpTime > 0) { const glow=player.shieldTime>0?'#68e789':player.cannonTime>0?'#ffe57a':player.magnetTime>0?'#74eee0':'#c6ff6b';ctx.strokeStyle=glow;ctx.lineWidth=4;ctx.globalAlpha=.82;ctx.beginPath();ctx.arc(0,-103,53+Math.sin(now/65)*5,0,Math.PI*2);ctx.stroke();ctx.fillStyle=glow;ctx.globalAlpha=.95;ctx.fillRect(-34,-225,68,6);ctx.fillStyle='#111722';ctx.fillRect(-33,-224,66,4);ctx.fillStyle=glow;ctx.fillRect(-33,-224,66*Math.max(player.charge??0,(player.super>0||player.shieldTime>0||player.cannonTime>0||player.magnetTime>0||player.superJumpTime>0)?.25:0),4);}
   if(player.freezeTime>0){ctx.save();ctx.globalAlpha=.78;ctx.strokeStyle='#9cecff';ctx.lineWidth=4;ctx.beginPath();ctx.roundRect(-39,-152+airborne*3,78,101,21);ctx.stroke();ctx.fillStyle='#b8f1ff';[[-32,-151],[31,-145],[-34,-65],[34,-58]].forEach(([cx,cy])=>{ctx.beginPath();ctx.moveTo(cx,cy-8);ctx.lineTo(cx+7,cy);ctx.lineTo(cx,cy+8);ctx.lineTo(cx-7,cy);ctx.closePath();ctx.fill();});ctx.restore();}
   if(player.shieldTime>0){ctx.save();ctx.globalAlpha=.9;ctx.fillStyle='#a0ffb6';ctx.font='900 24px system-ui';ctx.textAlign='center';ctx.fillText('+',0,-230);ctx.restore();}
@@ -566,9 +686,10 @@ document.querySelector('[data-close-dialog]').addEventListener('click', () => $(
 $('#help-dialog').addEventListener('click', (event) => { if (event.target === $('#help-dialog')) $('#help-dialog').close(); });
 $('#fullscreen-btn').addEventListener('click', toggleFullscreen);
 $('#menu-btn').addEventListener('click', () => { clearInput();if(snapshot().mode==='playing')game.togglePause();$('#game-root').hidden=true;menu.show();matchStarted=false; });
-$('#touch-mode-btn').addEventListener('click', () => { touchCombatMode=!touchCombatMode;const controls=$('.action-cluster');controls.classList.toggle('combat-mode',touchCombatMode);$('.touch-controls').dataset.mode=touchCombatMode?'combat':'basic';const button=$('#touch-mode-btn');button.textContent=touchCombatMode?'BALL':'⚡';button.setAttribute('aria-label',touchCombatMode?'Back to football controls':'Show combat controls'); });
+$('#touch-mode-btn').addEventListener('click', () => { touchCombatMode=!touchCombatMode;const controls=$('.action-cluster');controls.classList.toggle('combat-mode',touchCombatMode);$('.touch-controls').dataset.mode=touchCombatMode?'combat':'basic';const button=$('#touch-mode-btn');button.textContent=touchCombatMode?t('touch.ball'):'⚡';button.setAttribute('aria-label',t(touchCombatMode?'touch.backFootball':'touch.showCombat')); });
+$('#locale-btn').addEventListener('click', () => setLocale(getLocale()==='en'?'zh-CN':'en'));
 function toggleFullscreen(){ if(document.fullscreenElement)document.exitFullscreen?.();else document.querySelector('.game-shell').requestFullscreen?.(); }
-document.addEventListener('fullscreenchange', () => { const full=Boolean(document.fullscreenElement);$('#fullscreen-btn').setAttribute('aria-label',full?'Exit fullscreen':'Enter fullscreen');$('#fullscreen-btn').title=full?'Exit fullscreen':'Fullscreen'; });
+document.addEventListener('fullscreenchange', () => { const full=Boolean(document.fullscreenElement);$('#fullscreen-btn').setAttribute('aria-label',t(full?'game.exitFullscreen':'game.enterFullscreen'));$('#fullscreen-btn').title=t(full?'game.exitFullscreen':'game.fullscreen'); });
 
 function startGame(options={}) {
   const settings=menu.getSettings?.()??{};
@@ -580,13 +701,14 @@ function startGame(options={}) {
   clearInput();manualStepping=false;previousFrame=0;
   menu.hide();$('#game-root').hidden=false;matchStarted=true;
   game.start(matchOptions);
-  $('#match-message').textContent=matchOptions.matchType==='local'?'BLUE WASD · RED ARROWS · BLUE SPACE / E · RED ENTER':'ARROWS / WASD MOVE · X / SPACE QUICK · HOLD E / ENTER TO CHARGE';$('#match-message').classList.add('visible');clearTimeout(eventTimer);eventTimer=setTimeout(()=>$('#match-message').classList.remove('visible'),2200);
+  const startHint=t(matchOptions.matchType==='local'?'startHint.local':'startHint.solo');
+  const message=$('#match-message');message.textContent=startHint;message.style.color='';message.style.borderColor='';message.style.boxShadow='';message.classList.add('visible');clearTimeout(eventTimer);eventTimer=setTimeout(()=>message.classList.remove('visible'),2400);
 }
 function applySettings(settings={}) {
   soundVolume=settings.soundVolume??0;soundEnabled=soundVolume>0;
   syncSoundControl();
 }
-function syncSoundControl(){ $('#sound-btn').setAttribute('aria-label',soundEnabled?'Turn sound off':'Turn sound on');$('#sound-btn').title=soundEnabled?'Sound on':'Sound off';$('#sound-btn').style.color=soundEnabled?'#c6ff6b':''; }
+function syncSoundControl(){ $('#sound-btn').setAttribute('aria-label',t(soundEnabled?'game.soundOff':'game.soundOn'));$('#sound-btn').title=t(soundEnabled?'game.soundEnabled':'game.soundDisabled');$('#sound-btn').style.color=soundEnabled?'#c6ff6b':''; }
 function applyCosmetic(cosmetic={}) { window.__footballCosmetic=cosmetic; }
 
 window.render_game_to_text = () => JSON.stringify({ coordinateSystem: 'origin top-left; x increases right, y increases down', ...snapshot() });
@@ -598,6 +720,15 @@ window.advanceTime = (ms) => {
 };
 function tickGame(dt){const frameInput={...input};for(const [key,pressed]of Object.entries(edgePulses))if(pressed)frameInput[key]=true;game.update(dt,frameInput);Object.keys(edgePulses).forEach((key)=>edgePulses[key]=false);recordGhostFrame(dt,snapshot());}
 window.__footballGame = game;
+applyLocale(document);
+syncLocaleChrome();
 menu.show();
 render();
+subscribeLocale(() => {
+  applyLocale(document);
+  syncLocaleChrome();
+  const localeButton=$('#locale-btn');
+  localeButton.textContent=getLocale()==='en'?'中文':'EN';
+  localeButton.setAttribute('aria-label',t('menu.localeToggle'));
+});
 animationId = requestAnimationFrame(frame);

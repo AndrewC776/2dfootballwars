@@ -1,12 +1,25 @@
 const WIDTH = 1600;
 const HEIGHT = 900;
 const FLOOR_Y = 830;
-const CROSSBAR_Y = 650;
 const BALL_RADIUS = 32;
+export const PLAYER_HALF_WIDTH = 46;
+export const PLAYER_RENDER_SCALE = 1.24;
 const FIXED_STEP = 1 / 120;
 const REPLAY_SECONDS = 2;
 const REPLAY_SAMPLE_STEP = 1 / 30;
 let MATCH_SEQUENCE = 0;
+
+export const GOAL_GEOMETRY = Object.freeze({
+  topY: 210,
+  bottomY: 650,
+  depth: 220,
+  leftLineX: 220,
+  rightLineX: WIDTH - 220,
+});
+
+const CROSSBAR_Y = GOAL_GEOMETRY.topY;
+const GOAL_BALL_TOP = GOAL_GEOMETRY.topY + BALL_RADIUS;
+const GOAL_BALL_BOTTOM = GOAL_GEOMETRY.bottomY - BALL_RADIUS;
 
 export const POWER_DEFINITIONS = [
   { id: 1, name: 'Cannon Shot', cost: 35, cooldown: 8, duration: 7, range: 220, description: 'Fire a powered shot now, or arm your next kick.' },
@@ -31,6 +44,64 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const approach = (value, target, amount) => value < target
   ? Math.min(value + amount, target)
   : Math.max(value - amount, target);
+
+export function getPlayerRenderPose(player, elapsed = 0) {
+  const facing = player.facing ?? 1;
+  const speed = Math.min(1, Math.abs(player.vx ?? 0) / 360);
+  const airborne = clamp((FLOOR_Y - player.y) / 135, 0, 1);
+  const phase = elapsed * (player.sprint ? 11 : 8) + (player.number ?? 0);
+  const kickT = player.kick > 0 ? 1 - player.kick / 0.34 : 0;
+  const kickPhase = Math.sin(Math.min(1, kickT * 1.45) * Math.PI / 2);
+  const lean = -(player.charge ?? 0) * 10
+    + (player.kick > 0 ? facing * 19 : Math.sin(phase) * speed * 5);
+  const localShiftX = -facing * lean;
+  const headLocal = { x: 0, y: -173 + airborne * 7, rx: 26, ry: 31 };
+  const torsoLocal = { x: 0, y: -103.5 + airborne * 3, halfWidth: 34, halfHeight: 44.5 };
+  const renderX = player.x + localShiftX * PLAYER_RENDER_SCALE;
+  const headWorld = {
+    x: renderX + headLocal.x * PLAYER_RENDER_SCALE,
+    y: player.y + headLocal.y * PLAYER_RENDER_SCALE,
+    rx: headLocal.rx * PLAYER_RENDER_SCALE,
+    ry: headLocal.ry * PLAYER_RENDER_SCALE,
+  };
+  const torsoWorld = {
+    x: renderX + torsoLocal.x * PLAYER_RENDER_SCALE,
+    y: player.y + torsoLocal.y * PLAYER_RENDER_SCALE,
+    halfWidth: torsoLocal.halfWidth * PLAYER_RENDER_SCALE,
+    halfHeight: torsoLocal.halfHeight * PLAYER_RENDER_SCALE,
+  };
+  return { scale: PLAYER_RENDER_SCALE, airborne, lean, localShiftX, headLocal, headWorld, torsoLocal, torsoWorld };
+}
+
+function shotFitsGoal(ball, distance, horizontalSpeed, verticalSpeed) {
+  if (horizontalSpeed <= 0) return false;
+  const travelTime = distance / horizontalSpeed;
+  if (travelTime > 2.2) return false;
+  const y = ball.y + Math.min(ball.vy, verticalSpeed) * travelTime + 525 * travelTime ** 2;
+  return y >= GOAL_BALL_TOP && y <= GOAL_BALL_BOTTOM;
+}
+
+function minimumAICharge(ball, distance, horizontalBonus = 0, verticalBonus = 0) {
+  for (let charge = 0; charge <= 1.001; charge += 0.025) {
+    const normalizedCharge = Math.min(1, charge);
+    const speed = 500 + 370 * normalizedCharge + horizontalBonus;
+    const vertical = -540 - 220 * normalizedCharge - verticalBonus;
+    if (shotFitsGoal(ball, distance, speed, vertical)) return normalizedCharge;
+  }
+  return null;
+}
+
+function playerHorizontalBounds(player) {
+  const onGoalPlatform = player.y > GOAL_GEOMETRY.bottomY + 0.01;
+  return {
+    minX: onGoalPlatform && player.x < GOAL_GEOMETRY.leftLineX + PLAYER_HALF_WIDTH
+      ? GOAL_GEOMETRY.leftLineX + PLAYER_HALF_WIDTH
+      : 90,
+    maxX: onGoalPlatform && player.x > GOAL_GEOMETRY.rightLineX - PLAYER_HALF_WIDTH
+      ? GOAL_GEOMETRY.rightLineX - PLAYER_HALF_WIDTH
+      : WIDTH - 90,
+  };
+}
 
 function freshPlayer(x, facing, number) {
   return {
@@ -112,7 +183,7 @@ export class FootballGame {
       ball: { x: ballX, y: FLOOR_Y - BALL_RADIUS, vx: 0, vy: 0, spin: 0, ignoredPlayer: -1, ignorePlayerTime: 0, scrumTime: 0, scrumCooldown: 0, scrumReleaseCount: 0, kickSequence: 0, blockedKickId: 0 },
       aiKickoffDelay: this.options.matchType === 'ai' ? 0.85 : 0,
       particles: [],
-      coordinates: { width: WIDTH, height: HEIGHT, origin: 'top-left', xAxis: 'right', yAxis: 'down', floorY: FLOOR_Y, crossbarY: CROSSBAR_Y },
+      coordinates: { width: WIDTH, height: HEIGHT, origin: 'top-left', xAxis: 'right', yAxis: 'down', floorY: FLOOR_Y, crossbarY: CROSSBAR_Y, goal: { ...GOAL_GEOMETRY } },
       powerReady: [false, false],
       replayFrames: [],
       replayIndex: 0,
@@ -311,39 +382,55 @@ export class FootballGame {
     const blockerGap = ball.x - opponent.x;
     const unservedBlock = ball.blockedKickId === ball.kickSequence
       && ball.kickSequence > 0 && ai.aiLastQuickBlockId !== ball.kickSequence;
+    const distanceToGoal = Math.max(0, ball.x - (GOAL_GEOMETRY.leftLineX - BALL_RADIUS));
+    const poweredChargeBonus = ai.power >= 80 && ai.super <= 0;
+    const normalCharge = minimumAICharge(ball, distanceToGoal, poweredChargeBonus ? 280 : 0, poweredChargeBonus ? 130 : 0);
+    const canCannon = ai.power >= POWER_DEFINITIONS[0].cost && ai.abilities[0] <= 0;
+    const quickShotFits = shotFitsGoal(ball, distanceToGoal, 760 + ai.vx * 0.25, -660);
     const aerialOpportunity = ball.y < FLOOR_Y - 130 && this.kickContact(ai, true).reachable
       && unservedBlock && (!opponentBlocksLane || blockerGap >= 90)
-      && ball.vx > -180 && ai.kickCooldown <= 0 && ai.downTime <= 0;
+      && ball.vx > -180 && quickShotFits && ai.kickCooldown <= 0 && ai.downTime <= 0;
     if (ai.aiRepositionAfterBlock && ai.x >= (ai.aiRetreatTargetX ?? ai.x + 1) - 20) {
       ai.aiRepositionAfterBlock = false;
       ai.aiRetreatTargetX = null;
     }
     const needsSpaceAfterBlock = ai.aiRepositionAfterBlock && !aerialOpportunity;
-    const guardX = clamp(ball.x + Math.min(110, Math.max(0, ball.vx * 0.18)), 1080, WIDTH - 120);
+    const guardX = clamp(ball.x + Math.min(110, Math.max(0, ball.vx * 0.18)),
+      GOAL_GEOMETRY.rightLineX - 250, GOAL_GEOMETRY.rightLineX - PLAYER_HALF_WIDTH);
     const targetX = goalThreat ? guardX : aerialOpportunity ? ai.x : needsSpaceAfterBlock ? ai.aiRetreatTargetX : behindBallX;
     const dx = targetX - ai.x;
     const inKickReach = this.kickContact(ai, false).reachable && ai.facing === attackDirection && ball.x < ai.x;
     const ballReachable = ball.y > FLOOR_Y - 205 || (ball.vy > 0 && ball.y < FLOOR_Y - 205);
     const opponentInPath = Math.abs(opponent.x - ai.x) < 112 && Math.abs(opponent.y - ai.y) < 150;
-    const jump = !goalThreat && ballReachable && ai.jumpsUsed < 2 && ai.jump <= 0
+    const keeperDistance = ball.vx > 80 ? (GOAL_GEOMETRY.rightLineX - BALL_RADIUS - ball.x) / ball.vx : Infinity;
+    const keeperBallY = ball.y + ball.vy * keeperDistance + 525 * keeperDistance ** 2;
+    const keeperCanReach = goalThreat && keeperDistance > 0.06 && keeperDistance < 1.35
+      && keeperBallY >= GOAL_BALL_TOP && keeperBallY <= GOAL_BALL_BOTTOM
+      && keeperBallY >= ai.y - 430 && Math.abs(ai.x - guardX) < 115;
+    const keeperJump = keeperCanReach && keeperBallY < ai.y - 188 && ai.aiJumpCooldown <= 0;
+    const attackJump = !goalThreat && ballReachable
       && (ball.y < ai.y - 88 || (opponentInPath && opponentBlocksLane && !needsSpaceAfterBlock))
       && Math.abs(ball.x - ai.x) < (needsSpaceAfterBlock ? 230 : 142) && ai.vy >= -120 && ai.aiJumpCooldown <= 0;
+    const jump = ai.jumpsUsed < 2 && ai.jump <= 0 && ai.vy >= -120 && (attackJump || keeperJump);
     const hasShootingSpace = !opponentBlocksLane || blockerGap >= 90 || aerialOpportunity;
     const canShoot = inKickReach && !aerialOpportunity && !needsSpaceAfterBlock && hasShootingSpace && ai.kickCooldown <= 0 && ai.downTime <= 0;
     const quickKick = aerialOpportunity && hasShootingSpace && ai.kickCooldown <= 0 && ai.downTime <= 0;
-    const requiredCharge = opponentBlocksLane && !aerialOpportunity ? 0.84 : 0.4;
-    const releaseCharge = canShoot && ai.charge >= requiredCharge;
+    const requiredCharge = Math.max(opponentBlocksLane && !aerialOpportunity ? 0.84 : 0, normalCharge ?? 1);
+    const useCannon = canShoot && normalCharge === null && canCannon && ai.charge >= 0.98;
+    const releaseCharge = canShoot && !useCannon
+      && ((normalCharge !== null && ai.charge >= requiredCharge) || (normalCharge === null && !canCannon && ai.charge >= 1));
     return {
       left: dx < -10,
       right: dx > 10,
       jump,
       quickKick,
-      charging: canShoot && !releaseCharge,
+      charging: canShoot && !releaseCharge && !useCannon,
       kick: releaseCharge,
       speed,
       sprint: Math.abs(dx) > 240 && ai.stamina > 20,
       jab: false,
       facing: attackDirection,
+      powers: [useCannon, false, false, false, false],
     };
   }
 
@@ -381,7 +468,19 @@ export class FootballGame {
     if (!direction) player.vx = approach(player.vx, 0, (player.slideTime > 0 ? 185 : 760) * dt);
     player.x = clamp(player.x + player.vx * dt, 90, WIDTH - 90);
 
-    const grounded = player.y >= FLOOR_Y - 0.01;
+    const horizontalBounds = playerHorizontalBounds(player);
+    if (player.x < horizontalBounds.minX) {
+      player.x = horizontalBounds.minX;
+      player.vx = Math.max(0, player.vx);
+    } else if (player.x > horizontalBounds.maxX) {
+      player.x = horizontalBounds.maxX;
+      player.vx = Math.min(0, player.vx);
+    }
+
+    const onGoalPlatform = Math.abs(player.y - GOAL_GEOMETRY.bottomY) < 0.01
+      && (player.x < GOAL_GEOMETRY.leftLineX + PLAYER_HALF_WIDTH
+        || player.x > GOAL_GEOMETRY.rightLineX - PLAYER_HALF_WIDTH);
+    const grounded = player.y >= FLOOR_Y - 0.01 || onGoalPlatform;
     if (grounded) player.jumpsUsed = 0;
     if (command.jump && player.downTime <= 0 && (grounded || player.jumpsUsed < 2)) {
       const jumpBoost = player.superJumpTime > 0 ? 1.42 : 1;
@@ -391,9 +490,15 @@ export class FootballGame {
       if (index === 1) player.aiJumpCooldown = 0.75;
       this.emit('jump', { player: index === 0 ? 'blue' : 'red' });
     }
+    const previousY = player.y;
     player.vy += 1750 * dt;
     player.y += player.vy * dt;
-    if (player.y > FLOOR_Y) {
+    const overlapsGoalPlatform = player.x < GOAL_GEOMETRY.leftLineX + PLAYER_HALF_WIDTH
+      || player.x > GOAL_GEOMETRY.rightLineX - PLAYER_HALF_WIDTH;
+    if (player.vy > 0 && previousY <= GOAL_GEOMETRY.bottomY && player.y >= GOAL_GEOMETRY.bottomY && overlapsGoalPlatform) {
+      player.y = GOAL_GEOMETRY.bottomY;
+      player.vy = 0;
+    } else if (player.y > FLOOR_Y) {
       player.y = FLOOR_Y;
       player.vy = 0;
     }
@@ -446,8 +551,8 @@ export class FootballGame {
     const cannonShot = player.cannonTime > 0;
     const chipShot = !quick && !cannonShot && charge >= 0.8;
     const powered = cannonShot || (player.power >= 80 && player.super <= 0);
-    const impulse = chipShot ? 500 : (quick ? 760 : 500 + 370 * charge) + (powered ? 280 : 0);
-    const vertical = chipShot ? -700 : (quick ? -280 : -190 - 200 * charge) - (powered ? 130 : 0);
+    const impulse = (quick ? 760 : 500 + 370 * charge) + (powered ? 280 : 0);
+    const vertical = cannonShot ? -840 : quick ? -660 : -540 - 220 * charge - (powered ? 130 : 0);
     ball.kickSequence = (ball.kickSequence || 0) + 1;
     ball.blockedKickId = 0;
     ball.lastKickerSide = index === 0 ? 'blue' : 'red';
@@ -583,12 +688,33 @@ export class FootballGame {
     const [blue, red] = this.state.players;
     if (Math.abs(blue.y - red.y) > 110) return;
     const gap = red.x - blue.x;
-    const minimum = 74;
+    const direction = gap >= 0 ? 1 : -1;
+    const bluePose = getPlayerRenderPose(blue, this.state.elapsed ?? 0);
+    const redPose = getPlayerRenderPose(red, this.state.elapsed ?? 0);
+    const headsOverlapVertically = Math.abs(bluePose.headWorld.y - redPose.headWorld.y)
+      < bluePose.headWorld.ry + redPose.headWorld.ry;
+    const headSeparation = headsOverlapVertically
+      ? bluePose.headWorld.rx + redPose.headWorld.rx + 1
+        + direction * PLAYER_RENDER_SCALE * (bluePose.localShiftX - redPose.localShiftX)
+      : 0;
+    const minimum = Math.max(74, headSeparation);
     if (Math.abs(gap) < minimum) {
-      const direction = gap >= 0 ? 1 : -1;
       const overlap = (minimum - Math.abs(gap)) / 2;
-      blue.x = clamp(blue.x - direction * overlap, 90, WIDTH - 90);
-      red.x = clamp(red.x + direction * overlap, 90, WIDTH - 90);
+      const blueBounds = playerHorizontalBounds(blue);
+      const redBounds = playerHorizontalBounds(red);
+      let blueX = clamp(blue.x - direction * overlap, blueBounds.minX, blueBounds.maxX);
+      let redX = clamp(red.x + direction * overlap, redBounds.minX, redBounds.maxX);
+      if (Math.abs(redX - blueX) < minimum) {
+        if (direction > 0) {
+          redX = Math.max(redX, Math.min(redBounds.maxX, blueX + minimum));
+          if (redX - blueX < minimum) blueX = Math.max(blueBounds.minX, redX - minimum);
+        } else {
+          redX = Math.min(redX, Math.max(redBounds.minX, blueX - minimum));
+          if (blueX - redX < minimum) blueX = Math.min(blueBounds.maxX, redX + minimum);
+        }
+      }
+      blue.x = blueX;
+      red.x = redX;
       const closingSpeed = (blue.vx - red.vx) * direction;
       const impulse = direction * clamp(closingSpeed * 0.18, 0, 34);
       blue.vx -= impulse;
@@ -614,6 +740,8 @@ export class FootballGame {
     }
     ball.vx *= Math.pow(0.998, dt * 60);
     ball.spin *= Math.pow(0.985, dt * 60);
+    const previousX = ball.x;
+    const previousY = ball.y;
     ball.x += ball.vx * dt;
     ball.y += ball.vy * dt;
 
@@ -623,22 +751,45 @@ export class FootballGame {
       else ball.vy = 0;
       ball.vx *= 0.91;
     }
-    const nearGoal = ball.x < 122 || ball.x > WIDTH - 122;
-    if (nearGoal && ball.y + BALL_RADIUS > CROSSBAR_Y && ball.y < CROSSBAR_Y && ball.vy > 0) {
-      ball.y = CROSSBAR_Y - BALL_RADIUS;
-      ball.vy = -Math.abs(ball.vy) * 0.52;
+    const insideLeftDepth = ball.x >= 0 && ball.x < GOAL_GEOMETRY.leftLineX;
+    const insideRightDepth = ball.x > GOAL_GEOMETRY.rightLineX && ball.x <= WIDTH;
+    const wholeBallFits = ball.y - BALL_RADIUS >= GOAL_GEOMETRY.topY
+      && ball.y + BALL_RADIUS <= GOAL_GEOMETRY.bottomY;
+    const leftEntryX = GOAL_GEOMETRY.leftLineX + BALL_RADIUS;
+    const rightEntryX = GOAL_GEOMETRY.rightLineX - BALL_RADIUS;
+    const crossedLeftFace = ball.vx < 0 && previousX > leftEntryX && ball.x <= leftEntryX;
+    const crossedRightFace = ball.vx > 0 && previousX < rightEntryX && ball.x >= rightEntryX;
+
+    if (ball.vx < 0 && (crossedLeftFace || ball.x < leftEntryX) && !wholeBallFits) {
+      ball.x = leftEntryX;
+      ball.vx = Math.abs(ball.vx) * 0.62;
+    }
+    if (ball.vx > 0 && (crossedRightFace || ball.x > rightEntryX) && !wholeBallFits) {
+      ball.x = rightEntryX;
+      ball.vx = -Math.abs(ball.vx) * 0.62;
     }
 
-    // Only a whole ball moving through the playable aperture may enter the net.
-    const belowCrossbar = ball.y - BALL_RADIUS >= CROSSBAR_Y;
-    const aboveGround = ball.y + BALL_RADIUS <= FLOOR_Y + 1;
-    const inLeftMouth = ball.x >= -120 && ball.x < 120 && ball.vx < 0 && belowCrossbar && aboveGround;
-    const inRightMouth = ball.x > WIDTH - 120 && ball.x <= WIDTH + 120 && ball.vx > 0 && belowCrossbar && aboveGround;
-    if (!inLeftMouth && ball.x - BALL_RADIUS < 0) {
+    if (insideLeftDepth && ball.y + BALL_RADIUS > GOAL_GEOMETRY.bottomY && ball.vy > 0) {
+      ball.y = GOAL_BALL_BOTTOM;
+      ball.vy = -Math.max(95, Math.abs(ball.vy)) * 0.52;
+      ball.vx *= 0.91;
+    } else if (insideRightDepth && ball.y + BALL_RADIUS > GOAL_GEOMETRY.bottomY && ball.vy > 0) {
+      ball.y = GOAL_BALL_BOTTOM;
+      ball.vy = -Math.max(95, Math.abs(ball.vy)) * 0.52;
+      ball.vx *= 0.91;
+    }
+
+    const insideGoalDepth = insideLeftDepth || insideRightDepth;
+    if (insideGoalDepth && ball.y - BALL_RADIUS < GOAL_GEOMETRY.topY) {
+      ball.y = GOAL_BALL_TOP;
+      ball.vy = previousY < GOAL_BALL_TOP ? -Math.abs(ball.vy) * 0.52 : Math.abs(ball.vy) * 0.52;
+    }
+
+    if (ball.x < 0) {
       ball.x = BALL_RADIUS;
       ball.vx = Math.abs(ball.vx) * 0.62;
     }
-    if (!inRightMouth && ball.x + BALL_RADIUS > WIDTH) {
+    if (ball.x > WIDTH) {
       ball.x = WIDTH - BALL_RADIUS;
       ball.vx = -Math.abs(ball.vx) * 0.62;
     }
@@ -708,9 +859,11 @@ export class FootballGame {
   collideBallWithPlayer(player, index) {
     const ball = this.state.ball;
     if (ball.ignoredPlayer === index && ball.ignorePlayerTime > 0) return;
+    const pose = getPlayerRenderPose(player, this.state.elapsed ?? 0);
     const parts = [
       { x: player.x, y: player.y - 62, radius: 37, factor: 0.52 },
       { x: player.x, y: player.y - 126, radius: 30, factor: 0.78 },
+      { x: pose.headWorld.x, y: pose.headWorld.y, radius: Math.max(pose.headWorld.rx, pose.headWorld.ry), factor: 0.78 },
     ];
     for (const part of parts) {
       const dx = ball.x - part.x;
@@ -753,12 +906,12 @@ export class FootballGame {
   }
 
   checkGoal() {
-    if (this.state.rules === 'trials') return false;
+    if (this.state.rules === 'trials' || this.state.mode !== 'playing') return false;
     const ball = this.state.ball;
-    const belowBar = ball.y - BALL_RADIUS >= CROSSBAR_Y;
-    const aboveGround = ball.y + BALL_RADIUS <= FLOOR_Y + 1;
-    const crossedRight = ball.x >= WIDTH - 36 && ball.vx > 0 && belowBar && aboveGround;
-    const crossedLeft = ball.x <= 36 && ball.vx < 0 && belowBar && aboveGround;
+    const wholeBallFits = ball.y - BALL_RADIUS >= GOAL_GEOMETRY.topY
+      && ball.y + BALL_RADIUS <= GOAL_GEOMETRY.bottomY;
+    const crossedRight = ball.x - BALL_RADIUS >= GOAL_GEOMETRY.rightLineX && ball.vx > 0 && wholeBallFits;
+    const crossedLeft = ball.x + BALL_RADIUS <= GOAL_GEOMETRY.leftLineX && ball.vx < 0 && wholeBallFits;
     if (!crossedRight && !crossedLeft) return false;
 
     const scorer = crossedRight ? 'blue' : 'red';

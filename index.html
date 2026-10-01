@@ -56,7 +56,7 @@
         <div class="skill-bar-head">
           <div class="skill-heading"><span class="skill-bar-title">蓝队技能</span><span class="skill-bar-hint">Z 炮击 · C 吸球 · V 高跳 · B 冻结 · N 回血</span></div>
           <div class="skill-energy" aria-label="Energy">
-            <span>能量</span><strong id="skill-energy-value">35 / 100</strong>
+            <span class="skill-energy-label">Energy</span><strong id="skill-energy-value">35 / 100</strong>
             <div class="skill-energy-meter"><i id="skill-energy-fill"></i></div>
           </div>
         </div>
@@ -89,6 +89,7 @@
           <button class="primary-button" id="start-btn" type="button"><span aria-hidden="true">▶</span> RESUME MATCH</button>
         </div>
         <div class="tool-actions">
+          <button class="icon-button locale-button" id="locale-btn" type="button" aria-label="Switch language to 简体中文" title="Language">中文</button>
           <button class="icon-button" id="sound-btn" type="button" aria-label="Turn sound on" title="Sound off"><span aria-hidden="true">♫</span></button>
           <button class="icon-button" id="restart-btn" type="button" aria-label="Restart match" title="Restart"><span aria-hidden="true">↻</span></button>
           <button class="icon-button help-button" id="controls-btn" type="button" aria-label="Show controls" title="Controls"><span aria-hidden="true">?</span></button>
@@ -103,12 +104,9 @@
     </main>
 
     <dialog id="help-dialog" class="help-dialog">
-      <div class="dialog-head"><div><span class="eyebrow">ON THE PITCH</span><h2>Controls</h2></div><button class="icon-button" data-close-dialog aria-label="Close controls">×</button></div>
-      <div class="control-columns">
-        <div><h3>Blue player</h3><p><kbd>A</kbd> <kbd>D</kbd> move <kbd>W</kbd> jump</p><p><kbd>SPACE</kbd> quick shot · hold / release <kbd>E</kbd> for a charged shot</p><p><kbd>SHIFT</kbd> sprint <kbd>S</kbd> slide <kbd>Q</kbd> brace</p><p><kbd>1</kbd>–<kbd>5</kbd> powers</p><p><kbd>NUM 6</kbd>–<kbd>9</kbd> strikes</p></div>
-        <div><h3>Red player</h3><p><kbd>←</kbd> <kbd>→</kbd> move <kbd>↑</kbd> jump</p><p><kbd>ENTER</kbd> hold / release shoot</p><p><kbd>RIGHT SHIFT</kbd> sprint <kbd>↓</kbd> slide <kbd>/</kbd> brace</p><p><kbd>6</kbd>–<kbd>0</kbd> powers</p><p><kbd>I</kbd> <kbd>O</kbd> <kbd>K</kbd> <kbd>L</kbd> strikes</p></div>
-      </div>
-      <p class="dialog-note"><kbd>P</kbd> pause <kbd>R</kbd> restart <kbd>F</kbd> fullscreen</p>
+      <div class="dialog-head"><div><span class="eyebrow" id="help-eyebrow">ON THE PITCH</span><h2 id="help-title">Controls</h2></div><button class="icon-button" data-close-dialog aria-label="Close controls">×</button></div>
+      <div class="control-columns" id="help-columns"></div>
+      <p class="dialog-note" id="help-note"></p>
     </dialog>
     <script type="module" src="/main.js"></script>
   </body>

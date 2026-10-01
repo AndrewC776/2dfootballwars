@@ -11,10 +11,14 @@ npm run dev
 
 Open the local URL printed by Vite. Use the match selectors to choose Computer or 2 Players, then start a 60-second match.
 
+## Language
+
+The interface supports English and Simplified Chinese. The first visit follows the browser language; use the `EN` / `中文` control in the menu or match toolbar to switch. Your choice is saved on this device.
+
 ## Controls
 
-- Single-player Blue: `A` / `D` or `←` / `→` move, `W` or `↑` jump, and `S` or `↓` slide. Press `X` or `Space` for a quick shot; hold/release `E` or `Enter` for a charged shot. `Left Shift` sprints and `Q` braces.
-- Single-player skills: use the visible skill buttons, `Z` / `C` / `V` / `B` / `N`, or `1`–`5`: Cannon Shot (35 energy), Magnet (20), Sky Jump (15), Freeze (25), and Heal (20). Their buttons show energy needs, active/armed state, cooldowns, and other activation gates; clicks and key presses explain denials such as low energy, cooldown, Freeze range, or full health.
+- Single-player Blue: `A` / `D` or `←` / `→` move, `W` or `↑` jump, and `S` or `↓` slide. Press `X` or `Space` to loft a shot toward the raised goal; jump close to the goal line, then shoot for an aerial strike. Hold/release `E` or `Enter` for a charged shot. `Left Shift` sprints and `Q` braces.
+- Single-player skills: `Z` fires a high-power Cannon shot when the ball is in range, or arms the next kick when it is farther away. Use the visible buttons, `Z` / `C` / `V` / `B` / `N`, or `1`–`5`: Cannon Shot (35 energy), Magnet (20), Sky Jump (15), Freeze (25), and Heal (20). Their buttons show energy needs, active/armed state, cooldowns, and other activation gates; clicks and key presses explain denials such as low energy, cooldown, Freeze range, or full health.
 - Energy restores automatically at 8 per second during play, with additional energy from kicks and goals.
 - Blue strikes: numpad `6`–`9`.
 - In 2 Player mode, Blue uses `A` / `D` to move, `W` to jump, `S` to slide, `Space` for a quick shot, and hold/release `E` to charge a shot. Blue skills use `1`–`5`; Blue strikes use numpad `6`–`9` or `Z` / `X` / `C` / `V`.
