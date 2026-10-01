@@ -8,15 +8,17 @@ const ctx = canvas.getContext('2d');
 const $ = (selector) => document.querySelector(selector);
 const game = new FootballGame({ onEvent: handleGameEvent });
 const input = Object.create(null);
-const heldKeys = new Set();
+const heldKeyActions = new Map();
+const heldActionCodes = new Map();
 const edgePulses = Object.create(null);
-const keyDownAt = Object.create(null);
+const actionDownAt = Object.create(null);
 let previousFrame = 0;
 let soundEnabled = false;
 let soundVolume = 0;
 let audioContext;
 let eventTimer;
 let skillNoticeUntil = 0;
+let healNoticeUntil = 0;
 let manualStepping = false;
 let animationId;
 let matchStarted = false;
@@ -40,13 +42,16 @@ if(initialProfile.matches===0&&!initialProfile.tutorialSeen&&initialProfile.sett
 
 function handleGameEvent(event) {
   const shotLabel = event?.type === 'kick' ? (event.powered ? 'CANNON STRIKE!' : event.quick ? 'DRIVE SHOT!' : 'CURVE SHOT!') : null;
-  const labels = { goal: event?.ownGoal ? 'OWN GOAL!' : 'GOOOAL!', power: event?.name ? `${event.name.toUpperCase()}!` : 'POWER UP!', power_denied: powerDeniedLabel(event), heal: `HEAL +${event?.healthRestored??0} HEALTH`, end: event?.winnerSide ? `${event.winnerSide.toUpperCase()} WINS` : 'FULL TIME' };
+  const skillNames=['炮击必杀','吸球','高跳','冻结','回血'];
+  const labels = { goal: event?.ownGoal ? 'OWN GOAL!' : 'GOOOAL!', power: `${skillNames[(event?.power??1)-1]??'技能'} 已发动`, power_denied: powerDeniedLabel(event), heal: `回血 +${event?.healthRestored??0} 生命 · +${event?.staminaRestored??0} 体力`, end: event?.winnerSide ? `${event.winnerSide.toUpperCase()} WINS` : 'FULL TIME' };
   if (shotLabel) labels.kick = shotLabel;
   const skillNotice=event?.type==='power'&&event.power>=1&&event.power<=5||event?.type==='power_denied'||event?.type==='heal';
   if(skillNotice)skillNoticeUntil=performance.now()+1400;
+  if(event?.type==='heal')healNoticeUntil=performance.now()+900;
   const priorityOverride=event?.type==='goal'||event?.type==='end';
   const ordinaryKickDuringSkillNotice=event?.type==='kick'&&event.skillPower!=='cannon'&&performance.now()<skillNoticeUntil;
-  if (labels[event?.type]&&!ordinaryKickDuringSkillNotice) {
+  const healActivationEcho=event?.type==='power'&&event.power===5&&performance.now()<healNoticeUntil;
+  if (labels[event?.type]&&!ordinaryKickDuringSkillNotice&&!healActivationEcho) {
     if(priorityOverride)skillNoticeUntil=0;
     $('#match-message').textContent = labels[event.type];
     $('#match-message').classList.add('visible');
@@ -76,14 +81,15 @@ function handleGameEvent(event) {
 }
 
 function powerDeniedLabel(event) {
-  const name = event?.name ?? POWER_DEFINITIONS?.[Math.max(0, (event?.power ?? 1) - 1)]?.name ?? 'Skill';
+  const names=['炮击必杀','吸球','高跳','冻结','回血'];
+  const name=names[(event?.power??1)-1]??'技能';
   const reason = event?.reason;
-  if (reason === 'energy') return `${name}: NEED ${event.cost ?? 0} ENERGY`;
-  if (reason === 'range') return `${name}: GET CLOSER (${Math.round(event.requiredRange ?? 0)} RANGE)`;
-  if (reason === 'cooldown') return `${name}: COOLDOWN ${Math.ceil(event.remaining ?? 0)}S`;
-  if (reason === 'full_health') return `${name}: HEALTH FULL`;
-  if (reason === 'down') return `${name}: GET BACK UP FIRST`;
-  return `${name}: NOT READY`;
+  if (reason === 'energy') return `${name} · 需要 ${event.cost ?? 0} 能量（当前 ${Math.floor(event.energy ?? 0)}）`;
+  if (reason === 'range') return `${name} · 对手需在 ${Math.round(event.requiredRange ?? 0)} 范围内`;
+  if (reason === 'cooldown') return `${name} · 冷却 ${Math.ceil(event.remaining ?? 0)} 秒`;
+  if (reason === 'full_health') return `${name} · 生命与体力已满`;
+  if (reason === 'down') return `${name} · 起身后才能使用`;
+  return `${name} · 暂不可用`;
 }
 
 function playSound(type) {
@@ -140,7 +146,15 @@ function syncHUD(state) {
   const arenaLabels={classic:'CLASSIC STADIUM',night:'NIGHT MATCH',neon:'NEON ARENA'};
   const ruleLabels={classic:'QUICK MATCH',chaos:'CHAOS',trials:'SKILL TRIAL',ghost:'GHOST RUN'};
   $('#arena-mode-label').textContent=`${arenaLabels[state.arena??arenaName]??String(state.arena??arenaName).toUpperCase()} · ${ruleLabels[state.rules]??'QUICK MATCH'}${state.goldenGoal?' · GOLDEN GOAL':''}`;
-  $('#match-summary').textContent=state.matchType==='local'?'BLUE PLAYER vs RED PLAYER':`BLUE vs CPU · ${String(state.difficulty??'normal').toUpperCase()}`;
+  const localMatch=state.matchType==='local'&&state.rules!=='trials';
+  $('#match-summary').textContent=localMatch?'BLUE PLAYER vs RED PLAYER':`BLUE vs CPU · ${String(state.difficulty??'normal').toUpperCase()}`;
+  $('#controls-primary').innerHTML=localMatch?'<kbd>A</kbd>/<kbd>D</kbd> 蓝方移动 · <kbd>W</kbd> 跳':'<kbd>←</kbd>/<kbd>→</kbd> 移动 · <kbd>↑</kbd> 跳 · <kbd>↓</kbd> 铲';
+  $('#controls-shot').innerHTML=localMatch?'<kbd>SPACE</kbd> 快射 · <kbd>E</kbd> 蓄力':'<kbd>X</kbd>/<kbd>SPACE</kbd> 快射 · <kbd>E</kbd>/<kbd>ENTER</kbd> 蓄力';
+  $('#controls-skill').innerHTML=localMatch?'<kbd>1</kbd>–<kbd>5</kbd> 蓝方技能':'<kbd>Z</kbd> <kbd>C</kbd> <kbd>V</kbd> <kbd>B</kbd> <kbd>N</kbd> 技能';
+  $('#controls-extra').innerHTML=localMatch?'<kbd>SHIFT</kbd> 冲刺 · <kbd>S</kbd> 铲球 · <kbd>Q</kbd> 防守':'<kbd>SHIFT</kbd> 冲刺 · <kbd>Q</kbd> 防守';
+  const secondary=$('#controls-secondary');
+  secondary.hidden=!localMatch;
+  secondary.innerHTML='<i></i><kbd>←</kbd>/<kbd>→</kbd> 红方移动 · <kbd>↑</kbd>跳 · <kbd>↓</kbd>铲 · <kbd>ENTER</kbd>射门 · <kbd>/</kbd>防守 · <kbd>6</kbd>–<kbd>0</kbd>技能';
   syncSkillBar(state);
   if (state.mode === 'paused') { clearInput(); $('#match-message').textContent='PAUSED'; $('#match-message').classList.add('visible'); }
   else if ($('#match-message').textContent === 'PAUSED') $('#match-message').classList.remove('visible');
@@ -154,6 +168,10 @@ function syncSkillBar(state) {
   const energy=Math.max(0,Math.min(100,player.power??0));
   const energyValue=$('#skill-energy-value');
   const energyFill=$('#skill-energy-fill');
+  const localMatch=state.matchType==='local'&&state.rules!=='trials';
+  const skillBar=$('.skill-bar');
+  skillBar.dataset.matchType=localMatch?'local':'ai';
+  $('.skill-bar-hint').textContent=localMatch?'双人蓝方：技能按 1–5':'单人：Z/C/V/B/N（数字 1–5 兼容）';
   const energySignature=`${Math.round(energy)}`;
   if(energySignature!==skillEnergySignature){
     skillEnergySignature=energySignature;
@@ -164,7 +182,7 @@ function syncSkillBar(state) {
   const names=POWER_DEFINITIONS??[];
   const opponent=state.players?.[1];
   const freezeDistance=opponent?Math.hypot((opponent.x??0)-(player.x??0),(opponent.y??0)-(player.y??0)):Infinity;
-  const signature=[Math.round(energy),state.mode,...names.map((definition,index)=>{
+  const signature=[Math.round(energy),state.mode,state.matchType,...names.map((definition,index)=>{
     const cooldown=player.powerCooldowns?.[index]??player.abilities?.[index]??0;
     const active=activeDurations[index]??0;
     const special=index===0?(player.cannonTime??0):index===1?(player.magnetTime??0):index===2?(player.superJumpTime??0):index===3?(state.players?.[1]?.freezeTime??0):(player.shieldTime??0);
@@ -173,7 +191,7 @@ function syncSkillBar(state) {
   })].join('|');
   names.forEach((definition)=>{
     const cost=$(`[data-skill="${definition.id}"] .skill-cost`);
-    const label=`${definition.cost} EN`;
+    const label=`${definition.cost} 能量`;
     if(cost&&cost.textContent!==label)cost.textContent=label;
   });
   if(signature===skillBarSignature)return;
@@ -181,20 +199,26 @@ function syncSkillBar(state) {
   names.forEach((definition,index)=>{
     const button=$(`[data-skill="${definition.id}"]`);
     if(!button)return;
+    const mainKey=button.querySelector('.skill-key-main');
+    const alternate=button.querySelector('.skill-key small');
+    if(mainKey)mainKey.textContent=localMatch?String(definition.id):(['Z','C','V','B','N'][index]);
+    if(alternate)alternate.hidden=localMatch;
     const cooldown=player.powerCooldowns?.[index]??player.abilities?.[index]??0;
     const active=Math.max(activeDurations[index]??0,index===0?(player.cannonTime??0):index===1?(player.magnetTime??0):index===2?(player.superJumpTime??0):index===3?(state.players?.[1]?.freezeTime??0):(player.shieldTime??0));
-    let stateText=cooldown>0?`COOLDOWN ${cooldown.toFixed(cooldown<10?1:0)}s`:'READY';
-    if(index===0&&(player.cannonTime??0)>0)stateText='ARMED';
-    else if(active>0)stateText=`ACTIVE ${active.toFixed(1)}s`;
-    else if(cooldown<=0&&energy<definition.cost)stateText=`NEED ${Math.ceil(definition.cost-energy)} EN`;
-    else if(cooldown<=0&&definition.id===4&&freezeDistance>definition.range)stateText='GET CLOSER';
-    else if(cooldown<=0&&definition.id===5&&player.health>=100&&player.stamina>=100)stateText='FULL HEALTH';
+    let stateText='可用';
+    if(index===0&&(player.cannonTime??0)>0)stateText=`已蓄炮 ${player.cannonTime.toFixed(1)}秒`;
+    else if(active>0)stateText=`生效 ${active.toFixed(1)}秒`;
+    else if(cooldown>0)stateText=`冷却 ${cooldown.toFixed(cooldown<10?1:0)}秒`;
+    else if(energy<definition.cost)stateText=`差 ${Math.ceil(definition.cost-energy)} 能量`;
+    else if(definition.id===4&&freezeDistance>definition.range)stateText='对手太远';
+    else if(definition.id===5&&player.health>=100&&player.stamina>=100)stateText='状态已满';
     button.querySelector('.skill-status').textContent=stateText;
-    button.setAttribute('aria-label',`${definition.name}, ${definition.cost} energy, ${stateText.toLowerCase()}`);
-    button.title=`${definition.description} (${definition.cost?`${definition.cost} energy`:'no energy cost'})`;
+    const chineseName=['炮击必杀','吸球','高跳','冻结','回血'][index];
+    button.setAttribute('aria-label',`${definition.name}（${chineseName}），${definition.cost} 点能量，${stateText}`);
+    button.title=`${chineseName} · ${definition.description} · 消耗 ${definition.cost} 能量 · ${stateText}`;
     button.dataset.cooldown=cooldown>0?'true':'false';
     button.dataset.active=active>0?'true':'false';
-    button.dataset.waiting=stateText.startsWith('NEED ')||stateText==='GET CLOSER'||stateText==='FULL HEALTH'?'true':'false';
+    button.dataset.waiting=stateText.startsWith('差 ')||stateText==='对手太远'||stateText==='状态已满'?'true':'false';
   });
 }
 
@@ -430,7 +454,16 @@ function restart() {
   if (matchStarted) game.restart();
 }
 
-const keyMap = {
+const soloKeyMap = {
+  KeyA: 'blueLeft', ArrowLeft: 'blueLeft', KeyD: 'blueRight', ArrowRight: 'blueRight',
+  KeyW: 'blueJump', ArrowUp: 'blueJump', KeyS: 'blueSlide', ArrowDown: 'blueSlide',
+  Space: 'blueQuickKick', KeyX: 'blueQuickKick', KeyE: 'blueKick', Enter: 'blueKick',
+  KeyQ: 'blueBrace', ShiftLeft: 'blueSprint',
+  Numpad6: 'blueJab', Numpad7: 'blueLeg', Numpad8: 'blueUppercut', Numpad9: 'blueSweep',
+  Digit1: 'bluePower1', Digit2: 'bluePower2', Digit3: 'bluePower3', Digit4: 'bluePower4', Digit5: 'bluePower5',
+  KeyZ: 'bluePower1', KeyC: 'bluePower2', KeyV: 'bluePower3', KeyB: 'bluePower4', KeyN: 'bluePower5'
+};
+const localKeyMap = {
   KeyA: 'blueLeft', ArrowLeft: 'redLeft', KeyD: 'blueRight', ArrowRight: 'redRight',
   KeyW: 'blueJump', ArrowUp: 'redJump', Space: 'blueQuickKick', KeyE: 'blueKick', Enter: 'redKick',
   KeyQ: 'blueBrace', Slash: 'redBrace', ShiftLeft: 'blueSprint', ShiftRight: 'redSprint',
@@ -441,18 +474,81 @@ const keyMap = {
   Digit1: 'bluePower1', Digit2: 'bluePower2', Digit3: 'bluePower3', Digit4: 'bluePower4', Digit5: 'bluePower5',
   Digit6: 'redPower1', Digit7: 'redPower2', Digit8: 'redPower3', Digit9: 'redPower4', Digit0: 'redPower5'
 };
+
+function shouldLeaveKeyboardToPage(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable || target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')) return true;
+  const control = target.closest('button, a[href], [role="button"]');
+  if (!control) return false;
+  return !control.closest('#game-root') || event.code === 'Enter' || event.code === 'Space';
+}
+
+function getKeyboardAction(code, state = snapshot()) {
+  if (!matchStarted || state.mode !== 'playing') return null;
+  const localMatch = state.matchType === 'local' && state.rules !== 'trials';
+  return (localMatch ? localKeyMap : soloKeyMap)[code] ?? null;
+}
+
+function holdKeyboardAction(code, action) {
+  if (heldKeyActions.has(code)) return false;
+  heldKeyActions.set(code, action);
+  if (!heldActionCodes.has(action)) heldActionCodes.set(action, new Set());
+  const codes = heldActionCodes.get(action);
+  if (!codes.size) actionDownAt[action] = performance.now();
+  codes.add(code);
+  input[action] = true;
+  return true;
+}
+
+function releaseKeyboardAction(code) {
+  const action = heldKeyActions.get(code);
+  if (!action) return;
+  heldKeyActions.delete(code);
+  const codes = heldActionCodes.get(action);
+  codes?.delete(code);
+  if (!codes?.size) {
+    input[action] = false;
+    heldActionCodes.delete(action);
+    if ((action === 'blueKick' || action === 'redKick') && performance.now() - (actionDownAt[action] ?? 0) < 160) {
+      edgePulses[action === 'blueKick' ? 'blueQuickKick' : 'redQuickKick'] = true;
+    }
+    delete actionDownAt[action];
+  }
+}
+
 window.addEventListener('keydown', (event) => {
-  const mapped = keyMap[event.code];
-  if (mapped) { event.preventDefault(); input[mapped] = true;edgePulses[mapped]=true;heldKeys.add(event.code);keyDownAt[event.code]=performance.now();if(matchStarted){manualStepping=false;previousFrame=0;} }
+  if (shouldLeaveKeyboardToPage(event)) return;
+  const mapped = getKeyboardAction(event.code);
+  if (mapped) {
+    event.preventDefault();
+    const firstPress = holdKeyboardAction(event.code, mapped);
+    if (firstPress && !event.repeat) {
+      edgePulses[mapped] = true;
+    }
+    manualStepping = false;
+    previousFrame = 0;
+    return;
+  }
   if (event.repeat) return;
-  if (event.code === 'KeyP' || event.code === 'Escape') { if (snapshot().mode === 'playing' || snapshot().mode === 'paused') { clearInput(); game.togglePause(); } }
-  if (event.code === 'KeyR') restart();
-  if (event.code === 'KeyF') toggleFullscreen();
+  if (event.code === 'KeyP' || event.code === 'Escape') {
+    if (snapshot().mode === 'playing' || snapshot().mode === 'paused') { event.preventDefault(); clearInput(); game.togglePause(); }
+  }
+  if (event.code === 'KeyR' && matchStarted) { event.preventDefault(); restart(); }
+  if (event.code === 'KeyF' && matchStarted) { event.preventDefault(); toggleFullscreen(); }
 });
-window.addEventListener('keyup', (event) => { const mapped=keyMap[event.code]; if(mapped) { input[mapped]=false;if((mapped==='blueKick'||mapped==='redKick')&&performance.now()-(keyDownAt[event.code]??0)<160)edgePulses[mapped==='blueKick'?'blueQuickKick':'redQuickKick']=true; } heldKeys.delete(event.code); });
+window.addEventListener('keyup', (event) => {
+  const action = heldKeyActions.get(event.code);
+  if (action) { if (!shouldLeaveKeyboardToPage(event)) event.preventDefault(); releaseKeyboardAction(event.code); }
+});
+$('#game-root').addEventListener('click', (event) => {
+  if (event.detail <= 0) return;
+  const gameControl = event.target instanceof Element ? event.target.closest('.skill-button, #pause-btn, #restart-btn') : null;
+  if (gameControl) requestAnimationFrame(() => gameControl.blur());
+});
 window.addEventListener('blur', clearInput);
 document.addEventListener('visibilitychange', () => { if (document.hidden) { clearInput(); previousFrame=0; } });
-function clearInput(){Object.keys(input).forEach((key)=>input[key]=false);Object.keys(edgePulses).forEach((key)=>edgePulses[key]=false);Object.keys(keyDownAt).forEach((key)=>delete keyDownAt[key]);heldKeys.clear();game.cancelInput();document.querySelectorAll('.touch-button.active').forEach((button)=>button.classList.remove('active'));}
+function clearInput(){Object.keys(input).forEach((key)=>input[key]=false);Object.keys(edgePulses).forEach((key)=>edgePulses[key]=false);Object.keys(actionDownAt).forEach((key)=>delete actionDownAt[key]);heldKeyActions.clear();heldActionCodes.clear();game.cancelInput();document.querySelectorAll('.touch-button.active').forEach((button)=>button.classList.remove('active'));}
 
 document.querySelectorAll('[data-control]').forEach((button) => {
   const control = button.dataset.control;
@@ -484,7 +580,7 @@ function startGame(options={}) {
   clearInput();manualStepping=false;previousFrame=0;
   menu.hide();$('#game-root').hidden=false;matchStarted=true;
   game.start(matchOptions);
-  $('#match-message').textContent='SPACE TO SHOOT · HOLD E TO CHARGE';$('#match-message').classList.add('visible');clearTimeout(eventTimer);eventTimer=setTimeout(()=>$('#match-message').classList.remove('visible'),2200);
+  $('#match-message').textContent=matchOptions.matchType==='local'?'BLUE WASD · RED ARROWS · BLUE SPACE / E · RED ENTER':'ARROWS / WASD MOVE · X / SPACE QUICK · HOLD E / ENTER TO CHARGE';$('#match-message').classList.add('visible');clearTimeout(eventTimer);eventTimer=setTimeout(()=>$('#match-message').classList.remove('visible'),2200);
 }
 function applySettings(settings={}) {
   soundVolume=settings.soundVolume??0;soundEnabled=soundVolume>0;

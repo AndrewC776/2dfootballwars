@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#070a10" />
     <meta name="description" content="A fast, playful two-player arcade football match." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='29' fill='%23fff' stroke='%23070a10' stroke-width='4'/%3E%3Cpath d='m32 14 11 8-4 13H25l-4-13zM21 22 9 18m34 4 12-4M25 35l-5 14m19-14 5 14M20 49l-11-5m35 5 11-5' fill='none' stroke='%23070a10' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
     <title>2D Football Wars</title>
   </head>
   <body>
@@ -53,27 +54,27 @@
 
       <section class="skill-bar" aria-label="Blue player skills">
         <div class="skill-bar-head">
-          <span class="skill-bar-title">BLUE SKILLS</span>
+          <div class="skill-heading"><span class="skill-bar-title">蓝队技能</span><span class="skill-bar-hint">Z 炮击 · C 吸球 · V 高跳 · B 冻结 · N 回血</span></div>
           <div class="skill-energy" aria-label="Energy">
-            <span>ENERGY</span><strong id="skill-energy-value">35 / 100</strong>
+            <span>能量</span><strong id="skill-energy-value">35 / 100</strong>
             <div class="skill-energy-meter"><i id="skill-energy-fill"></i></div>
           </div>
         </div>
         <div class="skill-list">
-          <button class="skill-button" type="button" data-control="bluePower1" data-skill="1" aria-label="Cannon Shot, 35 energy, ready" title="Cannon Shot">
-            <span class="skill-icon" aria-hidden="true">⚽</span><span class="skill-key">1</span><span class="skill-name">Cannon Shot</span><span class="skill-cost">35 EN</span><span class="skill-status">READY</span>
+          <button class="skill-button skill-cannon" type="button" data-control="bluePower1" data-skill="1" aria-label="Cannon Shot 炮击必杀, 35 energy, ready" title="Cannon Shot">
+            <span class="skill-icon" aria-hidden="true">✹</span><span class="skill-key"><b class="skill-key-main">Z</b><small>1</small></span><span class="skill-name">炮击必杀</span><span class="skill-cost">35 能量</span><span class="skill-status">可用</span>
           </button>
-          <button class="skill-button" type="button" data-control="bluePower2" data-skill="2" aria-label="Magnet, ready" title="Magnet">
-            <span class="skill-icon" aria-hidden="true">⊕</span><span class="skill-key">2</span><span class="skill-name">Magnet</span><span class="skill-cost">20 EN</span><span class="skill-status">READY</span>
+          <button class="skill-button skill-magnet" type="button" data-control="bluePower2" data-skill="2" aria-label="Magnet 吸球, ready" title="Magnet">
+            <span class="skill-icon" aria-hidden="true">⊕</span><span class="skill-key"><b class="skill-key-main">C</b><small>2</small></span><span class="skill-name">吸球</span><span class="skill-cost">20 能量</span><span class="skill-status">可用</span>
           </button>
-          <button class="skill-button" type="button" data-control="bluePower3" data-skill="3" aria-label="Sky Jump, ready" title="Sky Jump">
-            <span class="skill-icon" aria-hidden="true">↟</span><span class="skill-key">3</span><span class="skill-name">Sky Jump</span><span class="skill-cost">15 EN</span><span class="skill-status">READY</span>
+          <button class="skill-button skill-jump" type="button" data-control="bluePower3" data-skill="3" aria-label="Sky Jump 高跳, ready" title="Sky Jump">
+            <span class="skill-icon" aria-hidden="true">↟</span><span class="skill-key"><b class="skill-key-main">V</b><small>3</small></span><span class="skill-name">高跳</span><span class="skill-cost">15 能量</span><span class="skill-status">可用</span>
           </button>
-          <button class="skill-button" type="button" data-control="bluePower4" data-skill="4" aria-label="Freeze, ready" title="Freeze">
-            <span class="skill-icon" aria-hidden="true">❄</span><span class="skill-key">4</span><span class="skill-name">Freeze</span><span class="skill-cost">25 EN</span><span class="skill-status">READY</span>
+          <button class="skill-button skill-freeze" type="button" data-control="bluePower4" data-skill="4" aria-label="Freeze 冻结, ready" title="Freeze">
+            <span class="skill-icon" aria-hidden="true">❄</span><span class="skill-key"><b class="skill-key-main">B</b><small>4</small></span><span class="skill-name">冻结</span><span class="skill-cost">25 能量</span><span class="skill-status">可用</span>
           </button>
-          <button class="skill-button" type="button" data-control="bluePower5" data-skill="5" aria-label="Heal, ready" title="Heal">
-            <span class="skill-icon heal-icon" aria-hidden="true">+</span><span class="skill-key">5</span><span class="skill-name">Heal</span><span class="skill-cost">20 EN</span><span class="skill-status">READY</span>
+          <button class="skill-button skill-heal" type="button" data-control="bluePower5" data-skill="5" aria-label="Heal 回血, ready" title="Heal">
+            <span class="skill-icon heal-icon" aria-hidden="true">+</span><span class="skill-key"><b class="skill-key-main">N</b><small>5</small></span><span class="skill-name">回血</span><span class="skill-cost">20 能量</span><span class="skill-status">可用</span>
           </button>
         </div>
       </section>
@@ -95,8 +96,8 @@
         </div>
       </footer>
       <section class="controls-strip" aria-label="Keyboard controls">
-        <span><kbd>A</kbd> <kbd>D</kbd> move</span><span><kbd>W</kbd> jump</span><span><kbd>SPACE</kbd> quick shot · <kbd>E</kbd> charge</span><span><kbd>1</kbd>–<kbd>5</kbd> skills</span><span><kbd>SHIFT</kbd> sprint</span><span><kbd>S</kbd> slide</span><span><kbd>Q</kbd> brace</span><span><kbd>P</kbd> pause</span>
-        <span class="local-controls"><i></i><kbd>←</kbd><kbd>→</kbd> move · <kbd>↑</kbd> jump · <kbd>ENTER</kbd> shoot · <kbd>/</kbd> brace</span>
+        <span id="controls-primary"></span><span id="controls-shot"></span><span id="controls-skill"></span><span id="controls-extra"></span><span><kbd>P</kbd> pause</span>
+        <span class="local-controls" id="controls-secondary"><i></i></span>
       </section>
       </div>
     </main>
