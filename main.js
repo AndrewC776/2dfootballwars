@@ -7,6 +7,10 @@ import './styles.css';
 const canvas = document.querySelector('#game-canvas');
 const ctx = canvas.getContext('2d');
 const $ = (selector) => document.querySelector(selector);
+function setText(node,value){const next=String(value??'');if(node.textContent!==next)node.textContent=next;}
+function setHTML(node,value){if(node.innerHTML!==value)node.innerHTML=value;}
+function setAttr(node,name,value){const next=String(value);if(node.getAttribute(name)!==next)node.setAttribute(name,next);}
+function setStyle(node,name,value){const next=String(value);if(node.style[name]!==next)node.style[name]=next;}
 const game = new FootballGame({ onEvent: handleGameEvent });
 const POWER_LOCALE_KEYS=['power.cannon','power.magnet','power.superJump','power.freeze','power.heal'];
 const input = Object.create(null);
@@ -40,6 +44,9 @@ let cannonTrailUntil = 0;
 let cannonTrailSide = 'blue';
 let stadiumSlogans = [];
 let stadiumSloganLocale = '';
+let crowdTexture = null;
+let crowdTextureKey = '';
+let soccerBallTexture = null;
 const menu = createMenu({ onPlay: startGame, onSettings: applySettings, onCosmetic: applyCosmetic });
 const initialProfile=menu.getProfile();
 if(initialProfile.matches===0&&!initialProfile.tutorialSeen&&initialProfile.settings.difficulty==='normal')menu.setSetting('difficulty','easy');
@@ -130,45 +137,45 @@ function snapshot() {
 
 function syncHUD(state) {
   const scores = state.score ?? [0, 0];
-  $('#blue-score').textContent = scores[0] ?? 0;
-  $('#red-score').textContent = scores[1] ?? 0;
+  setText($('#blue-score'),scores[0]??0);
+  setText($('#red-score'),scores[1]??0);
   const remaining = Math.max(0, Math.ceil(state.remaining ?? 60));
-  $('#clock').textContent = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
-  $('#match-label').textContent = state.mode === 'replay' ? t('game.replay') : state.overtime ? t('game.goldenGoal') : (state.rules === 'trials' ? t('game.skillTrial') : state.matchType === 'local' ? t('game.twoPlayerMatch') : t('game.quickMatch'));
+  setText($('#clock'),`${Math.floor(remaining/60)}:${String(remaining%60).padStart(2,'0')}`);
+  setText($('#match-label'),state.mode==='replay'?t('game.replay'):state.overtime?t('game.goldenGoal'):(state.rules==='trials'?t('game.skillTrial'):state.matchType==='local'?t('game.twoPlayerMatch'):t('game.quickMatch')));
   const pause = $('#pause-btn');
-  pause.setAttribute('aria-label', t(state.mode === 'paused' ? 'game.resumeAria' : 'game.pause'));
-  pause.title = t(state.mode === 'paused' ? 'game.resumeAria' : 'game.pause');
-  pause.querySelector('span').textContent = state.mode === 'paused' ? '▶' : 'Ⅱ';
-  $('#start-btn').innerHTML = state.mode === 'paused' ? `<span aria-hidden="true">▶</span> ${t('game.resume')}` : `<span aria-hidden="true">●</span> ${t('game.matchLive')}`;
+  const pauseLabel=t(state.mode==='paused'?'game.resumeAria':'game.pause');
+  setAttr(pause,'aria-label',pauseLabel);setAttr(pause,'title',pauseLabel);
+  setText(pause.querySelector('span'),state.mode==='paused'?'▶':'Ⅱ');
+  setHTML($('#start-btn'),state.mode==='paused'?`<span aria-hidden="true">▶</span> ${t('game.resume')}`:`<span aria-hidden="true">●</span> ${t('game.matchLive')}`);
   const players = state.players ?? [];
   ['blue','red'].forEach((side,index)=>{
     const player=players[index]??{};
     const health=Math.max(0,Math.min(100,player.health??100));
     const stamina=Math.max(0,Math.min(100,player.stamina??100));
-    $(`#${side}-health`).style.width=`${health}%`;
-    $(`#${side}-stamina`).style.width=`${stamina}%`;
-    $(`#${side}-player-name`).textContent=player.number??(index+1);
+    setStyle($(`#${side}-health`),'width',`${health}%`);
+    setStyle($(`#${side}-stamina`),'width',`${stamina}%`);
+    setText($(`#${side}-player-name`),player.number??(index+1));
     const flags=[];
     if(player.downTime>0)flags.push(t('hud.down'));
     else if(player.brace)flags.push(t('hud.brace'));
     else if(player.sprint)flags.push(t('hud.sprint'));
     if(player.charge>0.05)flags.push(t('hud.charge',{percent:Math.round(player.charge*100)}));
-    $(`#${side}-state`).textContent=flags.join(' · ');
+    setText($(`#${side}-state`),flags.join(' · '));
   });
   const arenaLabels={classic:'game.classicStadium',night:'game.nightMatch',neon:'game.neonArena'};
   const ruleLabels={classic:'game.quickMatch',chaos:'game.chaos',trials:'game.skillTrial',ghost:'game.ghostRun'};
-  $('#arena-mode-label').textContent=`${t(arenaLabels[state.arena??arenaName]??'game.classicStadium')} · ${t(ruleLabels[state.rules]??'game.quickMatch')}${state.goldenGoal?' · '+t('game.goldenGoal'):''}`;
+  setText($('#arena-mode-label'),`${t(arenaLabels[state.arena??arenaName]??'game.classicStadium')} · ${t(ruleLabels[state.rules]??'game.quickMatch')}${state.goldenGoal?' · '+t('game.goldenGoal'):''}`);
   const localMatch=state.matchType==='local'&&state.rules!=='trials';
-  $('#match-summary').textContent=localMatch?t('game.bluePlayer'):t('game.blueVsCpu',{difficulty:t(`difficulty.${state.difficulty??'normal'}`)});
-  $('#controls-primary').innerHTML=localMatch?`<kbd>A</kbd>/<kbd>D</kbd> ${t('game.blue')} · <kbd>W</kbd> ${t('controls.jump')}`:`<kbd>←</kbd>/<kbd>→</kbd> ${t('controls.move')} · <kbd>↑</kbd> ${t('controls.jump')} · <kbd>↓</kbd> ${t('controls.slide')}`;
-  $('#controls-shot').innerHTML=localMatch?`<kbd>SPACE</kbd> ${t('controls.quick')} · <kbd>E</kbd> ${t('controls.charge')}`:`<kbd>X</kbd>/<kbd>SPACE</kbd> ${t('controls.loft')} · <kbd>E</kbd>/<kbd>ENTER</kbd> ${t('controls.charge')}`;
-  $('#controls-skill').innerHTML=localMatch?`<kbd>1</kbd>–<kbd>5</kbd> ${t('game.blue')} ${t('controls.abilities')}`:`<kbd>Z</kbd> <kbd>C</kbd> <kbd>V</kbd> <kbd>B</kbd> <kbd>N</kbd> ${t('controls.abilities')}`;
-  $('#controls-extra').innerHTML=localMatch?`<kbd>SHIFT</kbd> ${t('controls.sprint')} · <kbd>S</kbd> ${t('controls.slide')} · <kbd>Q</kbd> ${t('controls.brace')}`:`<kbd>SHIFT</kbd> ${t('controls.sprint')} · <kbd>Q</kbd> ${t('controls.brace')}`;
+  setText($('#match-summary'),localMatch?t('game.bluePlayer'):t('game.blueVsCpu',{difficulty:t(`difficulty.${state.difficulty??'normal'}`)}));
+  setHTML($('#controls-primary'),localMatch?`<kbd>A</kbd>/<kbd>D</kbd> ${t('game.blue')} · <kbd>W</kbd> ${t('controls.jump')}`:`<kbd>←</kbd>/<kbd>→</kbd> ${t('controls.move')} · <kbd>↑</kbd> ${t('controls.jump')} · <kbd>↓</kbd> ${t('controls.slide')}`);
+  setHTML($('#controls-shot'),localMatch?`<kbd>SPACE</kbd> ${t('controls.quick')} · <kbd>E</kbd> ${t('controls.charge')}`:`<kbd>X</kbd>/<kbd>SPACE</kbd> ${t('controls.loft')} · <kbd>E</kbd>/<kbd>ENTER</kbd> ${t('controls.charge')}`);
+  setHTML($('#controls-skill'),localMatch?`<kbd>1</kbd>–<kbd>5</kbd> ${t('game.blue')} ${t('controls.abilities')}`:`<kbd>Z</kbd> <kbd>C</kbd> <kbd>V</kbd> <kbd>B</kbd> <kbd>N</kbd> ${t('controls.abilities')}`);
+  setHTML($('#controls-extra'),localMatch?`<kbd>SHIFT</kbd> ${t('controls.sprint')} · <kbd>S</kbd> ${t('controls.slide')} · <kbd>Q</kbd> ${t('controls.brace')}`:`<kbd>SHIFT</kbd> ${t('controls.sprint')} · <kbd>Q</kbd> ${t('controls.brace')}`);
   const secondary=$('#controls-secondary');
-  secondary.hidden=!localMatch;
-  secondary.innerHTML=`<i></i><kbd>←</kbd>/<kbd>→</kbd> ${t('game.red')} ${t('controls.move')} · <kbd>↑</kbd>${t('controls.jump')} · <kbd>↓</kbd>${t('controls.slide')} · <kbd>ENTER</kbd>${t('controls.shoot')} · <kbd>/</kbd>${t('controls.brace')} · <kbd>6</kbd>–<kbd>0</kbd>${t('controls.abilities')}`;
+  if(secondary.hidden===localMatch)secondary.hidden=!localMatch;
+  setHTML(secondary,`<i></i><kbd>←</kbd>/<kbd>→</kbd> ${t('game.red')} ${t('controls.move')} · <kbd>↑</kbd>${t('controls.jump')} · <kbd>↓</kbd>${t('controls.slide')} · <kbd>ENTER</kbd>${t('controls.shoot')} · <kbd>/</kbd>${t('controls.brace')} · <kbd>6</kbd>–<kbd>0</kbd>${t('controls.abilities')}`);
   syncSkillBar(state);
-  if (state.mode === 'paused') { clearInput(); $('#match-message').textContent=t('game.paused'); $('#match-message').classList.add('visible'); }
+  if (state.mode === 'paused') { clearInput(); setText($('#match-message'),t('game.paused')); $('#match-message').classList.add('visible'); }
   else if ($('#match-message').textContent === t('game.paused')) $('#match-message').classList.remove('visible');
 }
 
@@ -232,10 +239,10 @@ function syncSkillBar(state) {
   const energyFill=$('#skill-energy-fill');
   const localMatch=state.matchType==='local'&&state.rules!=='trials';
   const skillBar=$('.skill-bar');
-  skillBar.dataset.matchType=localMatch?'local':'ai';
-  $('.skill-bar-hint').textContent=t(localMatch?'hud.localSkillHint':'hud.soloSkillHint');
-  $('.skill-bar-title').textContent=t('hud.skillTitle');
-  $('.skill-energy-label').textContent=t('hud.skillEnergy');
+  setAttr(skillBar,'data-match-type',localMatch?'local':'ai');
+  setText($('.skill-bar-hint'),t(localMatch?'hud.localSkillHint':'hud.soloSkillHint'));
+  setText($('.skill-bar-title'),t('hud.skillTitle'));
+  setText($('.skill-energy-label'),t('hud.skillEnergy'));
   const energySignature=`${Math.round(energy)}`;
   if(energySignature!==skillEnergySignature){
     skillEnergySignature=energySignature;
@@ -256,7 +263,7 @@ function syncSkillBar(state) {
   names.forEach((definition)=>{
     const cost=$(`[data-skill="${definition.id}"] .skill-cost`);
     const label=t('hud.skillCost',{cost:definition.cost});
-    if(cost&&cost.textContent!==label)cost.textContent=label;
+    if(cost)setText(cost,label);
   });
   if(signature===skillBarSignature)return;
   skillBarSignature=signature;
@@ -265,7 +272,7 @@ function syncSkillBar(state) {
     if(!button)return;
     const mainKey=button.querySelector('.skill-key-main');
     const alternate=button.querySelector('.skill-key small');
-    if(mainKey)mainKey.textContent=localMatch?String(definition.id):(['Z','C','V','B','N'][index]);
+    if(mainKey)setText(mainKey,localMatch?String(definition.id):(['Z','C','V','B','N'][index]));
     if(alternate)alternate.hidden=localMatch;
     const cooldown=player.powerCooldowns?.[index]??player.abilities?.[index]??0;
     const active=Math.max(activeDurations[index]??0,index===0?(player.cannonTime??0):index===1?(player.magnetTime??0):index===2?(player.superJumpTime??0):index===3?(state.players?.[1]?.freezeTime??0):(player.shieldTime??0));
@@ -276,13 +283,13 @@ function syncSkillBar(state) {
     else if(energy<definition.cost)stateText=t('hud.needMoreEnergy',{amount:Math.ceil(definition.cost-energy)});
     else if(definition.id===4&&freezeDistance>definition.range)stateText=t('hud.opponentFarShort');
     else if(definition.id===5&&player.health>=100&&player.stamina>=100)stateText=t('hud.healthFullShort');
-    button.querySelector('.skill-status').textContent=stateText;
+    setText(button.querySelector('.skill-status'),stateText);
     const skillName=t(POWER_LOCALE_KEYS[index]);
-    button.setAttribute('aria-label',`${skillName}, ${t('hud.skillCost',{cost:definition.cost})}, ${stateText}`);
-    button.title=`${skillName} · ${t(`power.${['cannonCopy','magnetCopy','superJumpCopy','freezeCopy','healCopy'][index]}`)} · ${t('hud.skillCost',{cost:definition.cost})} · ${stateText}`;
-    button.dataset.cooldown=cooldown>0?'true':'false';
-    button.dataset.active=active>0?'true':'false';
-    button.dataset.waiting=energy<definition.cost||definition.id===4&&freezeDistance>definition.range||definition.id===5&&player.health>=100&&player.stamina>=100?'true':'false';
+    setAttr(button,'aria-label',`${skillName}, ${t('hud.skillCost',{cost:definition.cost})}, ${stateText}`);
+    setAttr(button,'title',`${skillName} · ${t(`power.${['cannonCopy','magnetCopy','superJumpCopy','freezeCopy','healCopy'][index]}`)} · ${t('hud.skillCost',{cost:definition.cost})} · ${stateText}`);
+    setAttr(button,'data-cooldown',cooldown>0?'true':'false');
+    setAttr(button,'data-active',active>0?'true':'false');
+    setAttr(button,'data-waiting',energy<definition.cost||definition.id===4&&freezeDistance>definition.range||definition.id===5&&player.health>=100&&player.stamina>=100?'true':'false');
   });
 }
 
@@ -345,19 +352,31 @@ function drawCloud(x, y, width, height) {
 }
 
 function drawCrowd(x, y, width, height, seed, base='#737b89') {
+  const key=`${width}:${height}:${seed}:${base}`;
+  if(key!==crowdTextureKey){
+    crowdTexture=document.createElement('canvas');
+    crowdTexture.width=Math.ceil(width);crowdTexture.height=Math.ceil(height);
+    paintCrowd(crowdTexture.getContext('2d'),width,height,seed,base);
+    crowdTextureKey=key;
+  }
+  if(crowdTexture)ctx.drawImage(crowdTexture,x,y);
+  else paintCrowd(ctx,width,height,seed,base,x,y);
+}
+
+function paintCrowd(target,width,height,seed,base,offsetX=0,offsetY=0) {
   const colors = ['#f0d94b','#f2f4ec','#2d9bdd','#34bb78','#e14a3e','#944aaa','#111722'];
-  ctx.fillStyle = base; ctx.fillRect(x, y, width, height);
+  target.fillStyle = base; target.fillRect(offsetX, offsetY, width, height);
   const rowCount=Math.max(1,Math.floor(height/22));
   for (let row = 0; row < rowCount; row++) {
-    const rowY = y + 8 + row * 22;
-    ctx.fillStyle = row % 4 === 3 ? '#5a626f' : '#838b97'; ctx.fillRect(x, rowY + 14, width, 4);
+    const rowY = offsetY + 8 + row * 22;
+    target.fillStyle = row % 4 === 3 ? '#5a626f' : '#838b97'; target.fillRect(offsetX, rowY + 14, width, 4);
     const shift = row % 2 ? 10 : 0;
     for (let col = 0; col < 114; col++) {
       const hash = (col * 71 + row * 113 + seed * 13) % 17;
-      const cx = x + col * 15 + shift;
-      ctx.fillStyle = colors[(col * 13 + row * 7 + hash) % colors.length];
-      ctx.fillRect(cx, rowY + hash % 3, 5 + hash % 3, 7 + hash % 5);
-      ctx.fillStyle = '#242c38'; ctx.fillRect(cx + 1, rowY - 3, 4, 3);
+      const cx = offsetX + col * 15 + shift;
+      target.fillStyle = colors[(col * 13 + row * 7 + hash) % colors.length];
+      target.fillRect(cx, rowY + hash % 3, 5 + hash % 3, 7 + hash % 5);
+      target.fillStyle = '#242c38'; target.fillRect(cx + 1, rowY - 3, 4, 3);
     }
   }
 }
@@ -500,14 +519,46 @@ function drawBall(ball) {
   }
   if(speed>240){ctx.save();ctx.rotate(Math.atan2(ball.vy??0,ball.vx??0)+Math.PI);ctx.globalAlpha=Math.min(.72,(speed-180)/800);for(let i=0;i<4;i++){ctx.strokeStyle=i%2?'#e4fbff':'#ffffff';ctx.lineWidth=3-i*.4;ctx.beginPath();ctx.moveTo(22,-16+i*10);ctx.lineTo(58+i*15,-16+i*16);ctx.stroke();}ctx.restore();}
   if(speed>420){ctx.globalAlpha=.17;for(let i=3;i>=1;i--){ctx.fillStyle='#f5fbff';ctx.beginPath();ctx.arc(-ball.vx*.022*i,-ball.vy*.022*i,25-i*3,0,Math.PI*2);ctx.fill();}}
-  ctx.globalAlpha=1;ctx.rotate(ball.spin ?? 0);
+  ctx.globalAlpha=1;
   ctx.fillStyle='#090e1788';ctx.beginPath();ctx.ellipse(4,35,34,10,0,0,Math.PI*2);ctx.fill();
-  ctx.fillStyle='#f8fafc';ctx.beginPath();ctx.arc(0,0,32,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#c7d1dc';ctx.lineWidth=2;ctx.stroke();
-  ctx.fillStyle='#202735';
-  const pentagon=(cx,cy,r,rotation)=>{ctx.beginPath();for(let i=0;i<5;i++){const angle=rotation+i*Math.PI*2/5;const px=cx+Math.cos(angle)*r,py=cy+Math.sin(angle)*r;if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);}ctx.closePath();ctx.fill();};
-  pentagon(0,0,10,-Math.PI/2);
-  for(let i=0;i<5;i++){const a=i*Math.PI*2/5-.8;pentagon(Math.cos(a)*21,Math.sin(a)*21,7,a);}
   ctx.restore();
+  ctx.save();ctx.translate(ball.x,ball.y);ctx.scale(1,1/1.12);ctx.rotate(ball.spin??0);
+  ctx.drawImage(getSoccerBallTexture(),-32,-32,64,64);
+  ctx.restore();
+}
+
+function getSoccerBallTexture() {
+  if(soccerBallTexture)return soccerBallTexture;
+  const size=128,center=size/2,radius=61;
+  soccerBallTexture=document.createElement('canvas');
+  soccerBallTexture.width=size;soccerBallTexture.height=size;
+  const ballCtx=soccerBallTexture.getContext('2d');
+  if(!ballCtx)return soccerBallTexture;
+  ballCtx.save();ballCtx.beginPath();ballCtx.arc(center,center,radius,0,Math.PI*2);ballCtx.clip();
+  const sphere=ballCtx.createRadialGradient(47,39,4,64,66,69);
+  sphere.addColorStop(0,'#ffffff');sphere.addColorStop(.72,'#f5f7f8');sphere.addColorStop(1,'#c7d0d9');
+  ballCtx.fillStyle=sphere;ballCtx.fillRect(0,0,size,size);
+  const vertices=(cx,cy,r,rotation)=>Array.from({length:5},(_,i)=>({x:cx+Math.cos(rotation+i*Math.PI*2/5)*r,y:cy+Math.sin(rotation+i*Math.PI*2/5)*r}));
+  const rotation=-Math.PI/2,ringDistance=48,outerRadius=17,centerRadius=20;
+  ballCtx.strokeStyle='#778390';ballCtx.lineWidth=4;ballCtx.lineJoin='round';
+  for(let i=0;i<5;i++){
+    const angle=rotation+i*Math.PI*2/5;
+    ballCtx.beginPath();ballCtx.moveTo(center+Math.cos(angle)*centerRadius,center+Math.sin(angle)*centerRadius);
+    ballCtx.lineTo(center+Math.cos(angle)*(ringDistance-outerRadius),center+Math.sin(angle)*(ringDistance-outerRadius));ballCtx.stroke();
+  }
+  const drawPanel=(points)=>{
+    ballCtx.beginPath();points.forEach((point,index)=>index?ballCtx.lineTo(point.x,point.y):ballCtx.moveTo(point.x,point.y));
+    ballCtx.closePath();ballCtx.fillStyle='#111923';ballCtx.fill();ballCtx.strokeStyle='#8894a1';ballCtx.lineWidth=2.5;ballCtx.stroke();
+  };
+  drawPanel(vertices(center,center,centerRadius,rotation));
+  for(let i=0;i<5;i++){
+    const angle=rotation+i*Math.PI*2/5,cx=center+Math.cos(angle)*ringDistance,cy=center+Math.sin(angle)*ringDistance;
+    drawPanel(vertices(cx,cy,outerRadius,angle+Math.PI));
+  }
+  const gloss=ballCtx.createRadialGradient(40,34,1,54,47,38);
+  gloss.addColorStop(0,'#ffffff48');gloss.addColorStop(1,'#ffffff00');ballCtx.fillStyle=gloss;ballCtx.fillRect(0,0,size,size);
+  ballCtx.restore();ballCtx.beginPath();ballCtx.arc(center,center,radius,0,Math.PI*2);ballCtx.strokeStyle='#aab5c1';ballCtx.lineWidth=2.4;ballCtx.stroke();
+  return soccerBallTexture;
 }
 
 function recordGhostFrame(dt, state) {

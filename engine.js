@@ -7,6 +7,12 @@ export const PLAYER_RENDER_SCALE = 1.24;
 const FIXED_STEP = 1 / 120;
 const REPLAY_SECONDS = 2;
 const REPLAY_SAMPLE_STEP = 1 / 30;
+const PLAYER_MOVE_SPEED = 520;
+const PLAYER_MOVE_ACCEL = 2500;
+const PLAYER_TURN_ACCEL = 8000;
+const PLAYER_STOP_DECEL = 6000;
+const PLAYER_SLIDE_STOP_DECEL = 185;
+const BALL_GROUND_FRICTION = 0.985;
 let MATCH_SEQUENCE = 0;
 
 export const GOAL_GEOMETRY = Object.freeze({
@@ -463,10 +469,16 @@ export class FootballGame {
     if (command.facing === -1 || command.facing === 1) player.facing = command.facing;
     else if (direction) player.facing = direction;
     const speedScale = command.speed ?? 1;
-    player.vx += direction * 980 * speedScale * sprintScale * dt;
-    player.vx = clamp(player.vx, -410 * speedScale * sprintScale, 410 * speedScale * sprintScale);
-    if (!direction) player.vx = approach(player.vx, 0, (player.slideTime > 0 ? 185 : 760) * dt);
+    const opposingDirection = direction !== 0 && player.vx !== 0 && Math.sign(player.vx) !== direction;
+    const acceleration = opposingDirection ? PLAYER_TURN_ACCEL : PLAYER_MOVE_ACCEL;
+    const maximumSpeed = PLAYER_MOVE_SPEED * speedScale * sprintScale;
+    player.vx = clamp(player.vx + direction * acceleration * speedScale * sprintScale * dt, -maximumSpeed, maximumSpeed);
+    if (!direction) {
+      const stopDeceleration = player.slideTime > 0 ? PLAYER_SLIDE_STOP_DECEL : PLAYER_STOP_DECEL;
+      player.vx = approach(player.vx, 0, stopDeceleration * dt);
+    }
     player.x = clamp(player.x + player.vx * dt, 90, WIDTH - 90);
+    if ((player.x <= 90 && player.vx < 0) || (player.x >= WIDTH - 90 && player.vx > 0)) player.vx = 0;
 
     const horizontalBounds = playerHorizontalBounds(player);
     if (player.x < horizontalBounds.minX) {
@@ -715,10 +727,6 @@ export class FootballGame {
       }
       blue.x = blueX;
       red.x = redX;
-      const closingSpeed = (blue.vx - red.vx) * direction;
-      const impulse = direction * clamp(closingSpeed * 0.18, 0, 34);
-      blue.vx -= impulse;
-      red.vx += impulse;
     }
   }
 
@@ -749,7 +757,7 @@ export class FootballGame {
       ball.y = FLOOR_Y - BALL_RADIUS;
       if (Math.abs(ball.vy) > 95) ball.vy *= -0.57;
       else ball.vy = 0;
-      ball.vx *= 0.91;
+      ball.vx *= Math.pow(BALL_GROUND_FRICTION, dt * 60);
     }
     const insideLeftDepth = ball.x >= 0 && ball.x < GOAL_GEOMETRY.leftLineX;
     const insideRightDepth = ball.x > GOAL_GEOMETRY.rightLineX && ball.x <= WIDTH;
